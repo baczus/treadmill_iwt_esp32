@@ -165,7 +165,7 @@ void tickSequence(unsigned long now) {
       if (now - seqTimer >= INTERVAL_3MIN) {
         sendCode(SPEED_UP, INCREASE_SPEED * SIGNALS_PER_KMH, 200);
         speedTenths += INCREASE_SPEED * SIGNALS_PER_KMH;
-        strcpy(statusText, "Cycle up");
+        sprintf(statusText, "C up %d/%d", seqCycle + 1, CYCLE_COUNT);
         Serial.print("cycle "); Serial.print(seqCycle + 1); Serial.println("/5 walking speed up");
         seqTimer = now;
         seqPhase = 7;
@@ -179,7 +179,7 @@ void tickSequence(unsigned long now) {
           speedTenths -= INCREASE_SPEED * SIGNALS_PER_KMH;
         else
           speedTenths = 0;
-        strcpy(statusText, "Cooldown");
+        sprintf(statusText, "C down %d/%d", seqCycle + 1, CYCLE_COUNT);
         Serial.print("cycle "); Serial.print(seqCycle + 1); Serial.println("/5 walking speed down");
         seqCycle++;
         if (seqCycle < CYCLE_COUNT) {
