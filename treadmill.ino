@@ -63,20 +63,18 @@ void loop() {
   int state = digitalRead(PIN_SPEED_UP);
   if (lastUp == HIGH && state == LOW && now - lastUpPress > 100) {
     lastUpPress = now;
-    speedTenths++;
-    updateDisplay(statusText, speedTenths, seqPhase, seqCycle);
     Serial.println("speed up");
     tx.send(SPEED_UP, 24);
+    speedTenths++;
   }
   lastUp = state;
 
   int state2 = digitalRead(PIN_SPEED_DOWN);
   if (lastDown == HIGH && state2 == LOW && now - lastDownPress > 100) {
     lastDownPress = now;
-    if (speedTenths > 0) speedTenths--;
-    updateDisplay(statusText, speedTenths, seqPhase, seqCycle);
     Serial.println("speed down");
     tx.send(SPEED_DOWN, 24);
+    if (speedTenths > 0) speedTenths--;
   }
   lastDown = state2;
 
@@ -88,7 +86,6 @@ void loop() {
     seqTimer = now;
     speedTenths = 0;
     strcpy(statusText, "Stopping");
-    updateDisplay(statusText, speedTenths, seqPhase, seqCycle);
     Serial.println("=== internal walking started ===");
   }
   lastWalk = stateWalk;
