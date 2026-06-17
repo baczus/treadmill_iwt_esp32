@@ -1,4 +1,5 @@
 #include <RCSwitch.h>
+#include "display.h"
 
 RCSwitch tx;
 
@@ -17,19 +18,26 @@ unsigned long lastDownPress = 0;
 unsigned long lastWalkPress = 0;
 
 const int SIGNALS_PER_KMH = 10;
-const int MIN_TREADMILL_SPEED = 1; // km/h
-const int BASELINE_SPEED = 3; // km/h added on top of minimal
-const int INCREASE_SPEED = 3; // km/h added on top of baseline
+const int MIN_TREADMILL_SPEED = 1;
+const int BASELINE_SPEED = 3;
+const int INCREASE_SPEED = 3;
 const int CYCLE_COUNT = 5;
-const unsigned long INTERVAL_3MIN = 180000; // 3 minutes in ms
+const unsigned long INTERVAL_3MIN = 180000;
 
 int seqPhase = 0;
 int seqCycle = 0;
 unsigned long seqTimer = 0;
 bool running = false;
 
+int speedTenths = 0;
+char statusText[16] = "Ready";
+
 void setup() {
   Serial.begin(115200);
+
+  initDisplay();
+  updateDisplay(statusText, speedTenths, seqPhase, seqCycle);
+
   pinMode(PIN_SPEED_UP, INPUT_PULLUP);
   pinMode(PIN_SPEED_DOWN, INPUT_PULLUP);
   pinMode(PIN_INTERNAL_WALKING, INPUT_PULLUP);
@@ -57,6 +65,7 @@ void loop() {
     lastUpPress = now;
     Serial.println("speed up");
     tx.send(SPEED_UP, 24);
+    speedTenths++;
   }
   lastUp = state;
 
@@ -65,6 +74,7 @@ void loop() {
     lastDownPress = now;
     Serial.println("speed down");
     tx.send(SPEED_DOWN, 24);
+    if (speedTenths > 0) speedTenths--;
   }
   lastDown = state2;
 
@@ -74,86 +84,102 @@ void loop() {
     running = true;
     seqPhase = 1;
     seqTimer = now;
+    speedTenths = 0;
+    strcpy(statusText, "Stopping");
     Serial.println("=== internal walking started ===");
   }
   lastWalk = stateWalk;
 
   if (running) tickSequence(now);
 
+  updateDisplay(statusText, speedTenths, seqPhase, seqCycle);
   delay(10);
 }
 
 void tickSequence(unsigned long now) {
   switch (seqPhase) {
-    // === SEND STOP ===
     case 1:
       tx.setProtocol(1);
       tx.setPulseLength(422);
       tx.send(16776971UL, 24);
       Serial.println("stop sent");
+      speedTenths = 0;
+      strcpy(statusText, "Starting");
       seqTimer = now;
       seqPhase = 2;
       break;
 
-    // === WAIT 20s THEN SEND START ===
     case 2:
       if (now - seqTimer >= 20000) {
         tx.setProtocol(1);
         tx.setPulseLength(424);
         tx.send(16776974UL, 24);
         Serial.println("start sent");
+        speedTenths = MIN_TREADMILL_SPEED * SIGNALS_PER_KMH;
+        strcpy(statusText, "Baseline");
         seqTimer = now;
         seqPhase = 3;
       }
       break;
 
-    // === WAIT 10s THEN SEND BASELINE (40x speed up) ===
     case 3:
       if (now - seqTimer >= 10000) {
         tx.setProtocol(1);
         tx.setPulseLength(425);
         sendCode(SPEED_UP, BASELINE_SPEED * SIGNALS_PER_KMH, 200);
+        speedTenths += BASELINE_SPEED * SIGNALS_PER_KMH;
+        strcpy(statusText, "Speed up");
         Serial.println("baseline speed up done");
         seqTimer = now;
         seqPhase = 4;
       }
       break;
 
-    // === WAIT 3min THEN SEND WALK UP (30x speed up) ===
     case 4:
       if (now - seqTimer >= INTERVAL_3MIN) {
         sendCode(SPEED_UP, INCREASE_SPEED * SIGNALS_PER_KMH, 200);
+        speedTenths += INCREASE_SPEED * SIGNALS_PER_KMH;
+        strcpy(statusText, "Speed down");
         Serial.println("walking speed up done");
         seqTimer = now;
         seqPhase = 5;
       }
       break;
 
-    // === WAIT 3min THEN SEND WALK DOWN (30x speed down) ===
     case 5:
       if (now - seqTimer >= INTERVAL_3MIN) {
         sendCode(SPEED_DOWN, INCREASE_SPEED * SIGNALS_PER_KMH, 200);
-        Serial.println("walking speed down done");
+        if (speedTenths >= INCREASE_SPEED * SIGNALS_PER_KMH)
+          speedTenths -= INCREASE_SPEED * SIGNALS_PER_KMH;
+        else
+          speedTenths = 0;
         seqCycle = 0;
         seqTimer = now;
         seqPhase = 6;
+        strcpy(statusText, "Cycling");
+        Serial.println("walking speed down done");
       }
       break;
 
-    // === CYCLE: WAIT 3min THEN SEND CYCLE UP (30x speed up) ===
     case 6:
       if (now - seqTimer >= INTERVAL_3MIN) {
         sendCode(SPEED_UP, INCREASE_SPEED * SIGNALS_PER_KMH, 200);
+        speedTenths += INCREASE_SPEED * SIGNALS_PER_KMH;
+        strcpy(statusText, "Cycle up");
         Serial.print("cycle "); Serial.print(seqCycle + 1); Serial.println("/5 walking speed up");
         seqTimer = now;
         seqPhase = 7;
       }
       break;
 
-    // === CYCLE: WAIT 3min THEN SEND CYCLE DOWN (30x speed down) ===
     case 7:
       if (now - seqTimer >= INTERVAL_3MIN) {
         sendCode(SPEED_DOWN, INCREASE_SPEED * SIGNALS_PER_KMH, 200);
+        if (speedTenths >= INCREASE_SPEED * SIGNALS_PER_KMH)
+          speedTenths -= INCREASE_SPEED * SIGNALS_PER_KMH;
+        else
+          speedTenths = 0;
+        strcpy(statusText, "Cooldown");
         Serial.print("cycle "); Serial.print(seqCycle + 1); Serial.println("/5 walking speed down");
         seqCycle++;
         if (seqCycle < CYCLE_COUNT) {
@@ -165,18 +191,25 @@ void tickSequence(unsigned long now) {
       }
       break;
 
-    // === SEND COOLDOWN (40x speed down) ===
     case 8:
       sendCode(SPEED_DOWN, 40, 200);
-      Serial.println("cooldown done");
+      if (speedTenths >= 40)
+        speedTenths -= 40;
+      else
+        speedTenths = 0;
+      strcpy(statusText, "Complete!");
+      seqTimer = now;
       seqPhase = 9;
+      Serial.println("cooldown done");
       break;
 
-    // === DONE ===
     case 9:
-      Serial.println("=== internal walking done ===");
-      running = false;
-      seqPhase = 0;
+      if (now - seqTimer >= 3000) {
+        Serial.println("=== internal walking done ===");
+        running = false;
+        seqPhase = 0;
+        strcpy(statusText, "Ready");
+      }
       break;
   }
 }
