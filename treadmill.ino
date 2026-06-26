@@ -1,59 +1,73 @@
 #include <RCSwitch.h>
 #include "display.h"
+#include "settings.h"
+#include "buttons.h"
 
 RCSwitch tx;
 
-const unsigned long SPEED_UP   = 16776972UL;
-const unsigned long SPEED_DOWN = 16776970UL;
-const unsigned long CODE_STOP  = 16776971UL;
-const unsigned long CODE_START = 16776974UL;
+const unsigned long RF_UP    = 16776972UL;
+const unsigned long RF_DOWN  = 16776970UL;
+const unsigned long RF_STOP  = 16776971UL;
+const unsigned long RF_START = 16776974UL;
 
-const int PIN_SPEED_DOWN = 26;
-const int PIN_SPEED_UP   = 33;
-const int PIN_START_STOP = 25;
+const int SIGNALS_PER_KMH       = 10;
+const int START_SPEED_TENTHS    = 10;
+const int INTERVAL_PAIRS        = 5;
+const unsigned long PHASE_DURATION_MS = 180000;
 
-int lastUp = HIGH;
-int lastDown = HIGH;
-int lastStart = HIGH;
-unsigned long lastUpPress = 0;
-unsigned long lastDownPress = 0;
-unsigned long lastStartPress = 0;
-
-const int SIGNALS_PER_KMH = 10;
-const int MIN_TREADMILL_SPEED = 1;
-const int WARMUP_SPEED = 3;
-const int SPEED_STEP = 3;
-const int CYCLE_COUNT = 5;
-const unsigned long INTERVAL_3MIN = 180000;
-
-// Walking sequence state machine.
-//   1 = STOP & set Starting
-//   2 = wait 20s, send START, set speed 1 km/h
-//   3 = wait 10s, add WARMUP_SPEED km/h (ramp to 4 km/h)
-//   4 = wait 3min at 4 km/h (Warm-up)
-//   5 = wait 3min, add SPEED_STEP km/h (Fast)
-//   6 = wait 3min, sub SPEED_STEP km/h (Slow), then loop to 5 or go to 7
-//   7 = rapid slowdown (Cooling)
-//   8 = wait 3s, reset to idle
-int seqPhase = 0;
-int seqCycle = 0;
-unsigned long seqTimer = 0;
-bool running = false;
-
+int walkPhase = 0;
+int intervalPair = 0;
+unsigned long phaseTimer = 0;
+bool walkActive = false;
 int speedTenths = 0;
-char statusText[16] = "Ready";
+
+char statusMsg[16] = "Ready";
+
+// Non-blocking RF sender
+static unsigned long rfCode;
+static int rfCount;
+static int rfInterval;
+static unsigned long rfLastTime;
+static bool rfBusy = false;
+static int rfNextPhase;
+
+static void rfStart(unsigned long code, int count, int interval, int nextPhase) {
+  rfCode = code;
+  rfCount = count;
+  rfInterval = interval;
+  rfLastTime = 0;
+  rfBusy = true;
+  rfNextPhase = nextPhase;
+}
+
+static void rfProcess() {
+  if (!rfBusy) return;
+  unsigned long now = millis();
+  if (now - rfLastTime >= (unsigned long)rfInterval) {
+    tx.send(rfCode, 24);
+    rfCount--;
+    rfLastTime = now;
+    if (rfCount <= 0) {
+      rfBusy = false;
+      walkPhase = rfNextPhase;
+      phaseTimer = now;
+    }
+  }
+}
+
+int getDisplaySpeedTenths() {
+  return speedTenths;
+}
 
 void setup() {
   Serial.begin(115200);
 
+  settingsInit();
   initDisplay();
-  updateDisplay(statusText, speedTenths, seqPhase, seqCycle, 0);
+  initButtons();
+  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, 0);
 
-  pinMode(PIN_SPEED_UP, INPUT_PULLUP);
-  pinMode(PIN_SPEED_DOWN, INPUT_PULLUP);
-  pinMode(PIN_START_STOP, INPUT_PULLUP);
   tx.enableTransmit(14);
-
   tx.setProtocol(1);
   tx.setPulseLength(425);
   tx.setRepeatTransmit(3);
@@ -61,161 +75,158 @@ void setup() {
   Serial.println("ready");
 }
 
-void sendCode(unsigned long code, int times, int intervalMs) {
-  for (int i = 0; i < times; i++) {
-    tx.send(code, 24);
-    delay(intervalMs);
-  }
-}
-
 void loop() {
   unsigned long now = millis();
 
-  int state = digitalRead(PIN_SPEED_UP);
-  if (lastUp == HIGH && state == LOW && now - lastUpPress > 100) {
-    lastUpPress = now;
-    Serial.println("speed up");
-    tx.send(SPEED_UP, 24);
-    speedTenths++;
-  }
-  lastUp = state;
+  rfProcess();
 
-  int state2 = digitalRead(PIN_SPEED_DOWN);
-  if (lastDown == HIGH && state2 == LOW && now - lastDownPress > 100) {
-    lastDownPress = now;
-    Serial.println("speed down");
-    tx.send(SPEED_DOWN, 24);
-    if (speedTenths > 0) speedTenths--;
+  if (menuIsActive()) {
+    menuProcess(now);
+    delay(10);
+    return;
   }
-  lastDown = state2;
 
-  int stateStart = digitalRead(PIN_START_STOP);
-  if (!running && lastStart == HIGH && stateStart == LOW && now - lastStartPress > 100) {
-    lastStartPress = now;
-    running = true;
-    seqPhase = 1;
-    seqTimer = now;
+  ButtonEvent evUp    = readButton(btnUp);
+  ButtonEvent evDown  = readButton(btnDown);
+  ButtonEvent evStart = readButton(btnStart);
+
+  if (evStart == LONG_PRESS && !walkActive && menuCanOpen(now)) {
+    menuOpen();
+  } else if (evStart == SHORT_PRESS && !walkActive) {
+    walkActive = true;
+    walkPhase = stopBeforeStart ? 1 : 2;
+    phaseTimer = now;
     speedTenths = 0;
-    strcpy(statusText, "Init");
+    strcpy(statusMsg, "Init");
     Serial.println("=== internal walking started ===");
   }
-  lastStart = stateStart;
 
-  if (running) intervalWalkingTraining(now);
+  if (evUp == SHORT_PRESS) {
+    speedTenths++;
+    Serial.println("speed up");
+    tx.send(RF_UP, 24);
+  }
+  if (evDown == SHORT_PRESS) {
+    if (speedTenths > 0) speedTenths--;
+    Serial.println("speed down");
+    tx.send(RF_DOWN, 24);
+  }
 
-  updateDisplay(statusText, speedTenths, seqPhase, seqCycle, now);
+  if (walkActive) runWalkSequence(now);
+
+  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, now);
   delay(10);
 }
 
-void intervalWalkingTraining(unsigned long now) {
-  switch (seqPhase) {
-    // 1: STOP – send stop signal, arm for starting
+void runWalkSequence(unsigned long now) {
+  switch (walkPhase) {
     case 1:
-      tx.setProtocol(1);
-      tx.setPulseLength(422);
-      tx.send(CODE_STOP, 24);
+      tx.send(RF_STOP, 24);
       Serial.println("stop sent");
-      speedTenths = 0;
-      strcpy(statusText, "Init");
-      seqTimer = now;
-      seqPhase = 2;
+      strcpy(statusMsg, "Init");
+      phaseTimer = now;
+      walkPhase = 2;
       break;
 
-    // 2: wait 20s, send START, set speed to 1 km/h
     case 2:
-      if (now - seqTimer >= 20000) {
-        tx.setProtocol(1);
-        tx.setPulseLength(424);
-        tx.send(CODE_START, 24);
+      if (now - phaseTimer >= 20000) {
+        tx.send(RF_START, 24);
         Serial.println("start sent");
-        strcpy(statusText, "Starting");
-        speedTenths = MIN_TREADMILL_SPEED * SIGNALS_PER_KMH;
-        seqTimer = now;
-        seqPhase = 3;
+        strcpy(statusMsg, "Starting");
+        speedTenths = START_SPEED_TENTHS;
+        phaseTimer = now;
+        walkPhase = 3;
       }
       break;
 
-    // 3: RAMP – wait 10s, add WARMUP_SPEED km/h (1→4 km/h)
     case 3:
-      if (now - seqTimer >= 10000) {
-        tx.setProtocol(1);
-        tx.setPulseLength(425);
-        sendCode(SPEED_UP, WARMUP_SPEED * SIGNALS_PER_KMH, 200);
-        speedTenths += WARMUP_SPEED * SIGNALS_PER_KMH;
-        seqCycle = 0;
-        Serial.println("ramp done, entering warm-up");
-        strcpy(statusText, "Warm-up");
-        seqTimer = now;
-        seqPhase = 4;
-      }
-      break;
-
-    // 4: WARMUP – wait 3min at 4 km/h, then +3 km/h (4→7) for Fast
-    case 4:
-      if (now - seqTimer >= INTERVAL_3MIN) {
-        sendCode(SPEED_UP, SPEED_STEP * SIGNALS_PER_KMH, 200);
-        speedTenths += SPEED_STEP * SIGNALS_PER_KMH;
-        Serial.println("warm-up done, entering fast interval");
-        strcpy(statusText, "Fast");
-        seqTimer = now;
-        seqPhase = 5;
-      }
-      break;
-
-    // 5: FAST – wait 3min at 7 km/h, then -3 km/h (7→4) for Slow
-    case 5:
-      if (now - seqTimer >= INTERVAL_3MIN) {
-        sendCode(SPEED_DOWN, SPEED_STEP * SIGNALS_PER_KMH, 200);
-        if (speedTenths >= SPEED_STEP * SIGNALS_PER_KMH)
-          speedTenths -= SPEED_STEP * SIGNALS_PER_KMH;
-        else
-          speedTenths = 0;
-        Serial.println("fast interval done, entering slow interval");
-        strcpy(statusText, "Slow");
-        seqTimer = now;
-        seqPhase = 6;
-      }
-      break;
-
-    // 6: SLOW INTERVAL – wait 3min at 4 km/h
-    //    loops back to phase 5 (+3 km/h) for CYCLE_COUNT pairs, then exits to cooldown
-    case 6:
-      if (now - seqTimer >= INTERVAL_3MIN) {
-        if (seqCycle < CYCLE_COUNT - 1) {
-          sendCode(SPEED_UP, SPEED_STEP * SIGNALS_PER_KMH, 200);
-          speedTenths += SPEED_STEP * SIGNALS_PER_KMH;
-          seqCycle++;
-          Serial.print("slow interval done, cycle "); Serial.print(seqCycle); Serial.println("/5 entering fast interval");
-          strcpy(statusText, "Fast");
-          seqTimer = now;
-          seqPhase = 5;
+      if (now - phaseTimer >= 10000) {
+        int rampSignals = baseTenths - START_SPEED_TENTHS;
+        if (rampSignals > 0) {
+          rfStart(RF_UP, rampSignals, 200, 4);
+          phaseTimer = now;
+          speedTenths += rampSignals;
+          intervalPair = 0;
+          strcpy(statusMsg, "Ramping");
         } else {
-          Serial.println("slow interval done, entering cooldown");
-          strcpy(statusText, "Cooling");
-          seqPhase = 7;
+          intervalPair = 0;
+          speedTenths = baseTenths;
+          strcpy(statusMsg, "Warm-up");
+          phaseTimer = now;
+          walkPhase = 4;
         }
       }
       break;
 
-    // 7: COOLDOWN – rapid slowdown to stop
-    case 7:
-      sendCode(SPEED_DOWN, 40, 200);
-      if (speedTenths >= 40)
-        speedTenths -= 40;
-      else
-        speedTenths = 0;
-      seqTimer = now;
-      seqPhase = 8;
-      Serial.println("cooldown done");
+    case 4:
+      if (now - phaseTimer >= PHASE_DURATION_MS) {
+        rfStart(RF_UP, stepSizeSignals, 200, 5);
+        phaseTimer = now;
+        speedTenths += stepSizeSignals;
+        Serial.println("warm-up done, entering fast interval");
+        strcpy(statusMsg, "Fast");
+      }
       break;
 
-    // 8: show Complete! for 3s, then reset
+    case 5:
+      if (now - phaseTimer >= PHASE_DURATION_MS) {
+        rfStart(RF_DOWN, stepSizeSignals, 200, 6);
+        phaseTimer = now;
+        if (speedTenths >= stepSizeSignals)
+          speedTenths -= stepSizeSignals;
+        else
+          speedTenths = 0;
+        Serial.println("fast interval done, entering slow interval");
+        strcpy(statusMsg, "Slow");
+      }
+      break;
+
+    case 6:
+      if (now - phaseTimer >= PHASE_DURATION_MS) {
+        if (intervalPair < INTERVAL_PAIRS - 1) {
+          rfStart(RF_UP, stepSizeSignals, 200, 5);
+          phaseTimer = now;
+          speedTenths += stepSizeSignals;
+          intervalPair++;
+          Serial.print("slow interval done, cycle ");
+          Serial.print(intervalPair);
+          Serial.println("/5 entering fast interval");
+          strcpy(statusMsg, "Fast");
+        } else {
+          if (cooldownEnabled) {
+            rfStart(RF_DOWN, 40, 200, 8);
+            if (speedTenths >= 40)
+              speedTenths -= 40;
+            else
+              speedTenths = 0;
+          } else {
+            speedTenths = 0;
+          }
+          strcpy(statusMsg, "Cooling");
+          walkPhase = 7;
+          phaseTimer = now;
+          Serial.println("slow interval done, entering cooldown");
+        }
+      }
+      break;
+
+    case 7:
+      // Display shows "Cooldown..." (via display.cpp walkPhase==7 check)
+      // rfProcess sends the 40 RF_DOWN signals in loop()
+      // When done, rfProcess sets walkPhase = rfNextPhase (8)
+      if (!rfBusy) {
+        walkPhase = 8;
+        phaseTimer = now;
+      }
+      break;
+
     case 8:
-      if (now - seqTimer >= 3000) {
+      if (now - phaseTimer >= 3000) {
         Serial.println("=== internal walking done ===");
-        running = false;
-        seqPhase = 0;
-        strcpy(statusText, "Ready");
+        walkActive = false;
+        walkPhase = 0;
+        speedTenths = 0;
+        strcpy(statusMsg, "Ready");
       }
       break;
   }

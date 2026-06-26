@@ -1,0 +1,111 @@
+#include <Preferences.h>
+#include "settings.h"
+#include "display.h"
+#include "buttons.h"
+
+int stepSizeSignals = 35;
+int baseTenths = 40;
+int stopBeforeStart = 1;
+int cooldownEnabled = 1;
+
+static Preferences prefs;
+
+static bool menuActive = false;
+static bool menuEditMode = false;
+static int menuSelection = 0;
+
+static const int MENU_ITEM_COUNT = 4;
+static const char* const MENU_NAMES[MENU_ITEM_COUNT] = {"Step", "Base", "Stop", "Cool"};
+static int* const MENU_VALUES[MENU_ITEM_COUNT] = {&stepSizeSignals, &baseTenths, &stopBeforeStart, &cooldownEnabled};
+static const int MENU_MIN[MENU_ITEM_COUNT] = {5, 10, 0, 0};
+static const int MENU_MAX[MENU_ITEM_COUNT] = {80, 100, 1, 1};
+static const int MENU_STEP[MENU_ITEM_COUNT] = {5, 1, 1, 1};
+
+static unsigned long menuOpenTime = 0;
+static unsigned long menuExitTime = 0;
+
+bool menuCanOpen(unsigned long now) {
+  return now - menuExitTime > 1000;
+}
+
+void settingsInit() {
+  prefs.begin("treadmill", true);
+  stepSizeSignals = prefs.getInt("stepSig", 35);
+  baseTenths      = prefs.getInt("baseSpd", 40);
+  stopBeforeStart = prefs.getInt("stopBef", 1);
+  cooldownEnabled = prefs.getInt("coolEn", 1);
+  prefs.end();
+}
+
+void settingsSave() {
+  prefs.begin("treadmill", false);
+  prefs.putInt("stepSig", stepSizeSignals);
+  prefs.putInt("baseSpd", baseTenths);
+  prefs.putInt("stopBef", stopBeforeStart);
+  prefs.putInt("coolEn", cooldownEnabled);
+  prefs.end();
+}
+
+bool menuIsActive() {
+  return menuActive;
+}
+
+void menuOpen() {
+  menuActive = true;
+  menuEditMode = false;
+  menuSelection = 0;
+  menuOpenTime = millis();
+  btnStart.reset();
+}
+
+static void menuBrowseUp() {
+  menuSelection = (menuSelection + 1) % MENU_ITEM_COUNT;
+}
+
+static void menuBrowseDown() {
+  menuSelection = (menuSelection - 1 + MENU_ITEM_COUNT) % MENU_ITEM_COUNT;
+}
+
+static void menuEditUp() {
+  int* v = MENU_VALUES[menuSelection];
+  *v += MENU_STEP[menuSelection];
+  if (*v > MENU_MAX[menuSelection]) *v = MENU_MAX[menuSelection];
+}
+
+static void menuEditDown() {
+  int* v = MENU_VALUES[menuSelection];
+  *v -= MENU_STEP[menuSelection];
+  if (*v < MENU_MIN[menuSelection]) *v = MENU_MIN[menuSelection];
+}
+
+void menuProcess(unsigned long now) {
+  if (!menuActive) return;
+
+  ButtonEvent evUp    = readButton(btnUp);
+  ButtonEvent evDown  = readButton(btnDown);
+  ButtonEvent evStart = readButton(btnStart);
+
+  if (evStart == LONG_PRESS) {
+    settingsSave();
+    menuActive = false;
+    menuExitTime = now;
+    return;
+  }
+
+  if (evStart == SHORT_PRESS && now - menuOpenTime > 500) {
+    if (menuEditMode) {
+      menuEditMode = false;
+      settingsSave();
+    } else {
+      menuEditMode = true;
+    }
+  } else if (menuEditMode) {
+    if (evUp == SHORT_PRESS) menuEditUp();
+    if (evDown == SHORT_PRESS) menuEditDown();
+  } else if (evUp == SHORT_PRESS || evDown == SHORT_PRESS) {
+    if (evUp == SHORT_PRESS) menuBrowseUp();
+    if (evDown == SHORT_PRESS) menuBrowseDown();
+  }
+
+  updateMenuDisplay(menuEditMode, menuSelection, stepSizeSignals, baseTenths, stopBeforeStart, cooldownEnabled);
+}

@@ -6,45 +6,47 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 
 ## Założenia
 
-- Bieżnia rozumie 4 kody RF: START, STOP, SPEED_UP, SPEED_DOWN
-- Każdy impuls RF zmienia prędkość o 0.1 km/h (stała `SIGNALS_PER_KMH = 10` na 1 km/h)
-- Przyciski: SPEED_UP (pin 33), SPEED_DOWN (pin 26), START/STOP (pin 25) – wszystkie z pull-up
+- Bieżnia rozumie 4 kody RF: `RF_START`, `RF_STOP`, `RF_UP`, `RF_DOWN`
+- Każdy impuls RF zmienia prędkość o 0.1 km/h (`SIGNALS_PER_KMH = 10`)
+- Przyciski: `PIN_BTN_UP` (33), `PIN_BTN_DOWN` (26), `PIN_BTN_START` (25) – wszystkie INPUT_PULLUP
 - Naciśnięcie START/STOP uruchamia w pełni automatyczną sekwencję marszu
-- Podczas sekwencji przyciski SPEED_UP/DOWN nadal działają (ręczna korekta)
+- Podczas sekwencji przyciski UP/DOWN nadal działają (ręczna korekta)
 - Prędkość początkowa po starcie: 1 km/h
-- Rozgrzewka: +3 km/h → 4 km/h, 3 min marszu
-- Interwały: +3 km/h (szybki) / −3 km/h (wolny), 5 par po 3 min każda
+- Rozgrzewka: do prędkości bazowej (`baseTenths`), 3 min marszu
+- Interwały: `+stepSizeSignals` (szybki) / `−stepSizeSignals` (wolny), `INTERVAL_PAIRS` par po 3 min
 - Wychłodzenie: gwałtowne zmniejszenie prędkości do zera (−40 sygnałów)
 - Jeśli wyświetlacz nie odpowiada (brak urządzenia na 0x3C), program działa bez niego
-- Wysyłka RF blokuje pętlę główną na ~6s (30 sygnałów × 200ms) – wyświetlacz zamarza
+- Wysyłka RF blokuje pętlę główną – wyświetlacz zamarza podczas TX
 
 # Walking Sequence – State Machine (8 phases)
 
-| Phase | Action | Duration | Speed (km/h) | statusText (row 1) | Row 3 |
+| Phase | Action | Duration | Speed (km/h) | statusMsg (row 1) | Row 3 |
 |---|---|---|---|---|---|
-| 1 – STOP | send STOP signal | instant | 0 | `Starting` | — |
-| 2 – START | wait 20s, send START | 20s | 1.0 | `Starting` | — |
-| 3 – RAMP | wait 10s, +3 km/h (1→4) | 10s + ~6s TX | **4.0** | →`Warm-up` (po +3) | — |
-| 4 – WARMUP | wait 3 min at 4.0 | 3 min | **4.0** | `Warm-up` | — |
-| 4→5 | +3 km/h (4→7) | ~6s TX | **7.0** | →`Fast` | — |
-| 5 – FAST | wait 3 min at 7.0 | 3 min | **7.0** | `Fast` | `Cycle: 1/5` |
-| 5→6 | −3 km/h (7→4) | ~6s TX | **4.0** | →`Slow` | — |
-| 6 – SLOW | wait 3 min at 4.0 | 3 min | **4.0** | `Slow` | `Cycle: 1/5` |
-| 6→5 *(×4)* | +3 km/h (4→7) | ~6s TX | **7.0** | →`Fast` | cykl 2/5…5/5 |
+| 1 – STOP | send `RF_STOP` | instant | 0 | `Init` | — |
+| 2 – START | wait 20s, send `RF_START` | 20s | 1.0 | `Starting` | — |
+| 3 – RAMP | wait 10s, ramp 1→base | 10s + TX | **base** | →`Warm-up` | — |
+| 4 – WARMUP | wait 3 min | 3 min | **base** | `Warm-up` | — |
+| 4→5 | `+stepSizeSignals` | TX | **base+step** | →`Fast` | — |
+| 5 – FAST | wait 3 min | 3 min | **base+step** | `Fast` | `Cycle: X/5` |
+| 5→6 | `−stepSizeSignals` | TX | **base** | →`Slow` | — |
+| 6 – SLOW | wait 3 min | 3 min | **base** | `Slow` | `Cycle: X/5` |
+| 6→5 *(×4)* | `+stepSizeSignals` | TX | **base+step** | →`Fast` | cycle 2/5…5/5 |
 | 6→7 (exit) | — | — | — | →`Cooling` | — |
-| 7 – COOLDOWN | rapid slowdown (−40 sig) | ~8s TX | →0 | `Cooling` | `Cooldown...` |
-| 8 – COMPLETE | wait 3s, reset | 3s | 0 | `Cooling`→`Ready` | `Complete!` |
+| 7 – COOLDOWN | rapid slowdown (−40 sig, if enabled) | ~8s TX | →0 | `Cooling` | `Cooldown...` |
+| 8 – COMPLETE | wait 3s, reset | 3s | 0 | →`Ready` | `Complete!` |
 
-## Key variables
+## Key constants & variables
 
-| Name | Value | Purpose |
+| Name | Default | Purpose |
 |---|---|---|
 | `SIGNALS_PER_KMH` | 10 | RF signals per 1 km/h change |
-| `MIN_TREADMILL_SPEED` | 1 | Min speed after START (km/h) |
-| `WARMUP_SPEED` | 3 | km/h added during ramp (1→4) |
-| `SPEED_STEP` | 3 | km/h change per interval |
-| `CYCLE_COUNT` | 5 | Fast+Slow interval pairs |
-| `INTERVAL_3MIN` | 180000 | Wait duration per phase (ms) |
+| `START_SPEED_TENTHS` | 1 | Speed after START (km/h) |
+| `INTERVAL_PAIRS` | 5 | Fast+Slow interval pairs |
+| `PHASE_DURATION_MS` | 180000 | Duration per interval phase (ms) |
+| `stepSizeSignals` | 35 (NVS) | Speed change per interval (3.5 km/h) |
+| `baseTenths` | 40 (NVS) | Base/warmup speed (4.0 km/h) |
+| `stopBeforeStart` | 1 (NVS) | Send RF_STOP before starting sequence |
+| `cooldownEnabled` | 1 (NVS) | Enable rapid slowdown phase at the end |
 
 ## Pin mapping
 
@@ -53,15 +55,15 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 | 14 | RF transmit | output |
 | 21 (SDA) | OLED I2C | |
 | 22 (SCL) | OLED I2C | |
-| 25 | START/STOP button | input pullup |
-| 26 | SPEED DOWN button | input pullup |
-| 33 | SPEED UP button | input pullup |
+| 25 | `PIN_BTN_START` | input pullup |
+| 26 | `PIN_BTN_DOWN` | input pullup |
+| 33 | `PIN_BTN_UP` | input pullup |
 
 ## Display layout (128×32 OLED, 4 rows)
 
 ```
 Row 0:  ~~~ IWT ~~~              (centered x=31)
-Row 1:  <statusText>              (x=0, len ≤ 21 chars)
+Row 1:  <statusMsg>               (x=0, len ≤ 21 chars)
 Row 2:  Speed: X.X km/h           (x=0)
 Row 3:  <phase-dependent text>    (x=0)
         ▓▓░░░░░░░░  progress bar  (y=29, 3px tall)
@@ -78,13 +80,43 @@ Row 3:  <phase-dependent text>    (x=0)
 | 7 | `Cooldown...` | – |
 | 8 | `Complete!` | ✓ (3s) |
 
-Progress bar is a filled rectangle at the bottom of the display (y=29, height=3),
-proportional to `elapsed / totalSec`.
+Progress bar is a filled rectangle at y=29 (height=3), proportional to `elapsed / totalSec`.
 
 ## State machine rules
 
-- `seqPhase=0` = idle, `seqPhase=1..8` = walking active
-- Each phase sets statusText for the **next** phase at transition
-- SendCode blocks the loop (~6s per 30 signals @ 200ms interval) – display freezes during TX
-- `seqCycle` starts at 0 after ramp, increments in phase 6 loop (condition `seqCycle < CYCLE_COUNT-1`)
-- Display shows `seqCycle+1` for human-readable 1‑based count
+- `walkPhase == 0` = idle, `walkPhase == 1..8` = walking active
+- Each phase sets `statusMsg` for the **next** phase at transition
+- `sendRfCode()` blocks the loop during TX
+- `intervalPair` starts at 0 after ramp, increments in phase 6 loop (condition `intervalPair < INTERVAL_PAIRS - 1`)
+- Display shows `intervalPair + 1` for human-readable 1‑based count
+
+## Settings menu
+
+Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter settings.
+
+**Browse mode** (default on entry):
+- UP/DOWN → select between `Step` and `Base`
+- Short-press START → enter edit mode
+- Long-press START (5s) → save all, exit
+
+**Edit mode:**
+- UP/DOWN → change value (auto-repeats while held)
+- Short-press START → save value, back to browse
+- Long-press START (5s) → save all, exit
+
+**Settings stored in ESP32 NVS (Preferences):**
+| Setting | Variable | Default | Range | Step |
+|---|---|---|---|---|
+| `Step` | `stepSizeSignals` | 35 (3.5 km/h) | 5–80 (0.5–8.0) | 5 (0.5 km/h) |
+| `Base` | `baseTenths` | 40 (4.0 km/h) | 10–100 (1.0–10.0) | 1 (0.1 km/h) |
+| `Stop` | `stopBeforeStart` | 1 (On) | 0–1 (Off/On) | toggle |
+| `Cool` | `cooldownEnabled` | 1 (On) | 0–1 (Off/On) | toggle |
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `treadmill.ino` | Main loop, walking sequence state machine |
+| `buttons.h/cpp` | Button struct, readButton(), long-press detection |
+| `settings.h/cpp` | Settings menu, NVS persistence, menu button handling |
+| `display.h/cpp` | OLED init, main display, menu display |
