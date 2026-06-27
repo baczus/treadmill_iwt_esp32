@@ -86,9 +86,9 @@ void loop() {
     return;
   }
 
-  ButtonEvent evUp    = readButton(btnUp);
-  ButtonEvent evDown  = readButton(btnDown);
-  ButtonEvent evStart = readButton(btnStart);
+  ButtonEvent evUp    = readButton(BTN_UP);
+  ButtonEvent evDown  = readButton(BTN_DOWN);
+  ButtonEvent evStart = readButton(BTN_START);
 
   if (evStart == LONG_PRESS && !walkActive && menuCanOpen(now)) {
     menuOpen();

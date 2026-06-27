@@ -1,14 +1,15 @@
 # Projekt: Interwałowy chód na bieżni (ESP32)
 
 Sterownik do bieżni elektrycznej (Kettler) oparty na ESP32. Komunikacja z bieżnią przez
-433 MHz ASK/OOK (biblioteka RCSwitch). Wyświetlacz OLED SSD1306 128×32 (I2C, adres 0x3C,
+433 MHz ASK/OOK (biblioteka RCSwitch). Wyświetlacz OLED SSD1306 128×32 (I2C, adres 0x3C, SSD1306,
 piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 
 ## Założenia
 
 - Bieżnia rozumie 4 kody RF: `RF_START`, `RF_STOP`, `RF_UP`, `RF_DOWN`
 - Każdy impuls RF zmienia prędkość o 0.1 km/h (`SIGNALS_PER_KMH = 10`)
-- Przyciski: `PIN_BTN_UP` (33), `PIN_BTN_DOWN` (26), `PIN_BTN_START` (25) – wszystkie INPUT_PULLUP
+- Przyciski: `PIN_BTN_UP` (33), `PIN_BTN_DOWN` (26), `PIN_BTN_START` (25) – wszystkie INPUT_PULLUP, active low
+- Obsługa przycisków: direct `digitalRead()` z debounce 30ms (wykrywanie zbocza), bez biblioteki Button2
 - Naciśnięcie START/STOP uruchamia w pełni automatyczną sekwencję marszu
 - Podczas sekwencji przyciski UP/DOWN nadal działają (ręczna korekta)
 - Prędkość początkowa po starcie: 1 km/h
@@ -16,7 +17,7 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 - Interwały: `+stepSizeSignals` (szybki) / `−stepSizeSignals` (wolny), `INTERVAL_PAIRS` par po 3 min
 - Wychłodzenie: gwałtowne zmniejszenie prędkości do zera (−40 sygnałów)
 - Jeśli wyświetlacz nie odpowiada (brak urządzenia na 0x3C), program działa bez niego
-- Wysyłka RF blokuje pętlę główną – wyświetlacz zamarza podczas TX
+- Wysyłka RF jest nieblokująca (`rfStart()`/`rfProcess()` w głównej pętli), wyświetlacz nie zamarza podczas TX
 
 # Walking Sequence – State Machine (8 phases)
 
@@ -86,16 +87,27 @@ Progress bar is a filled rectangle at y=29 (height=3), proportional to `elapsed 
 
 - `walkPhase == 0` = idle, `walkPhase == 1..8` = walking active
 - Each phase sets `statusMsg` for the **next** phase at transition
-- `sendRfCode()` blocks the loop during TX
+- RF sending is non-blocking: `rfStart(queue)` schedules signals, `rfProcess()` in `loop()` sends one per call (with ~163ms interval)
 - `intervalPair` starts at 0 after ramp, increments in phase 6 loop (condition `intervalPair < INTERVAL_PAIRS - 1`)
 - Display shows `intervalPair + 1` for human-readable 1‑based count
+
+## Button handling
+
+- Direct `digitalRead()` with edge-triggered debounce (30ms)
+- `ButtonIndex` enum: `BTN_UP`, `BTN_DOWN`, `BTN_START`
+- `readButton(idx)` → `ButtonEvent` (NONE, SHORT_PRESS, LONG_PRESS)
+- Short press on UP/DOWN: adjust `speedTenths` by ±1 and send one RF signal
+- Long press (3s hold): send 10 RF signals
+- `longFired[]` flag suppresses SHORT_PRESS release event after LONG_PRESS has fired
+- START short-press: toggle walk sequence (start/stop)
+- START long-press (idle, 5s): enter settings menu
 
 ## Settings menu
 
 Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter settings.
 
 **Browse mode** (default on entry):
-- UP/DOWN → select between `Step` and `Base`
+- UP/DOWN → select between `Step`, `Base`, `Stop`, `Cool`
 - Short-press START → enter edit mode
 - Long-press START (5s) → save all, exit
 
@@ -116,7 +128,7 @@ Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter set
 
 | File | Purpose |
 |---|---|
-| `treadmill.ino` | Main loop, walking sequence state machine |
-| `buttons.h/cpp` | Button struct, readButton(), long-press detection |
+| `treadmill.ino` | Main loop, walking sequence state machine, non-blocking RF sender |
+| `buttons.h/cpp` | `ButtonIndex` enum, `ButtonEvent` enum, `readButton()` with debounce |
 | `settings.h/cpp` | Settings menu, NVS persistence, menu button handling |
-| `display.h/cpp` | OLED init, main display, menu display |
+| `display.h/cpp` | OLED init, main display, settings menu display |

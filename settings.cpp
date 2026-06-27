@@ -55,7 +55,6 @@ void menuOpen() {
   menuEditMode = false;
   menuSelection = 0;
   menuOpenTime = millis();
-  btnStart.reset();
 }
 
 static void menuBrowseUp() {
@@ -81,9 +80,9 @@ static void menuEditDown() {
 void menuProcess(unsigned long now) {
   if (!menuActive) return;
 
-  ButtonEvent evUp    = readButton(btnUp);
-  ButtonEvent evDown  = readButton(btnDown);
-  ButtonEvent evStart = readButton(btnStart);
+  ButtonEvent evUp    = readButton(BTN_UP);
+  ButtonEvent evDown  = readButton(BTN_DOWN);
+  ButtonEvent evStart = readButton(BTN_START);
 
   if (evStart == LONG_PRESS) {
     settingsSave();

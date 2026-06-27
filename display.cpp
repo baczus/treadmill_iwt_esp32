@@ -103,46 +103,32 @@ void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, i
   struct Item { const char* name; int val; int fmt; };
   Item items[4] = {{"Step", stepVal, 0}, {"Base", baseVal, 0}, {"Stop", stopVal, 1}, {"Cool", coolVal, 1}};
 
-  // Scroll window: show 3 items centered on selection
-  int startIdx = selection - 1;
-  if (startIdx < 0) startIdx = 0;
-  if (startIdx > 1) startIdx = 1;  // max start index for 4 items with 3 visible
-
-  for (int i = 0; i < 3; i++) {
-    int idx = startIdx + i;
-    if (idx >= 4) break;
-
-    display.setCursor(0, 8 + i * 8);
-
-    if (idx == selection) {
-      display.print(editMode ? "*" : ">");
-    } else {
-      display.print(" ");
-    }
-
-    display.print(items[idx].name);
-    display.print(": ");
-    if (items[idx].fmt == 0) {
-      display.print(items[idx].val / 10);
-      display.print(".");
-      display.print(items[idx].val % 10);
-      display.print(" km/h");
-    } else {
-      display.print(items[idx].val ? "On " : "Off");
-    }
-
-    if (idx == selection && editMode) {
-      display.print("*");
-    }
+  display.setCursor(0, 8);
+  if (editMode) {
+    display.print("*");
+  } else {
+    display.print(">");
+  }
+  display.print(items[selection].name);
+  display.print(": ");
+  if (items[selection].fmt == 0) {
+    display.print(items[selection].val / 10);
+    display.print(".");
+    display.print(items[selection].val % 10);
+    display.print(" km/h");
+  } else {
+    display.print(items[selection].val ? "On " : "Off");
+  }
+  if (editMode) {
+    display.print("*");
   }
 
-  // Scroll indicators
-  if (startIdx > 0) {
-    display.setCursor(120, 8);
+  if (selection > 0) {
+    display.setCursor(108, 8);
     display.print("^");
   }
-  if (startIdx < 1) {
-    display.setCursor(120, 24);
+  if (selection < 3) {
+    display.setCursor(120, 8);
     display.print("v");
   }
 
