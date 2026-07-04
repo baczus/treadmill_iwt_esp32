@@ -13,11 +13,11 @@ const unsigned long RF_START = 16776974UL;
 const int SIGNALS_PER_KMH       = 10;
 const int START_SPEED_TENTHS    = 10;
 const int INTERVAL_PAIRS        = 5;
-const unsigned long PHASE_DURATION_MS = 180000;
 
 int walkPhase = 0;
 int intervalPair = 0;
 unsigned long phaseTimer = 0;
+int phaseTotalSec = 0;
 bool walkActive = false;
 int speedTenths = 0;
 
@@ -35,7 +35,7 @@ static void rfStart(unsigned long code, int count, int interval, int nextPhase) 
   rfCode = code;
   rfCount = count;
   rfInterval = interval;
-  rfLastTime = 0;
+  rfLastTime = millis();
   rfBusy = true;
   rfNextPhase = nextPhase;
 }
@@ -126,6 +126,7 @@ void runWalkSequence(unsigned long now) {
       strcpy(statusMsg, "Init");
       phaseTimer = now;
       walkPhase = 2;
+      phaseTotalSec = 20;
       break;
 
     case 2:
@@ -136,15 +137,18 @@ void runWalkSequence(unsigned long now) {
         speedTenths = START_SPEED_TENTHS;
         phaseTimer = now;
         walkPhase = 3;
+        phaseTotalSec = 10;
       }
       break;
 
     case 3:
-      if (now - phaseTimer >= 10000) {
+      if (now - phaseTimer >= 10000 && !rfBusy) {
         int rampSignals = baseTenths - START_SPEED_TENTHS;
         if (rampSignals > 0) {
           rfStart(RF_UP, rampSignals, 200, 4);
           phaseTimer = now;
+          phaseTotalSec = rampSignals * 200 / 1000;
+          if (phaseTotalSec < 1) phaseTotalSec = 1;
           speedTenths += rampSignals;
           intervalPair = 0;
           strcpy(statusMsg, "Ramping");
@@ -154,47 +158,67 @@ void runWalkSequence(unsigned long now) {
           strcpy(statusMsg, "Warm-up");
           phaseTimer = now;
           walkPhase = 4;
+          phaseTotalSec = phaseDurationMinutes * 60;
         }
       }
       break;
 
     case 4:
-      if (now - phaseTimer >= PHASE_DURATION_MS) {
-        rfStart(RF_UP, stepSizeSignals, 200, 5);
-        phaseTimer = now;
-        speedTenths += stepSizeSignals;
-        Serial.println("warm-up done, entering fast interval");
-        strcpy(statusMsg, "Fast");
+      if (!rfBusy) {
+        phaseTotalSec = phaseDurationMinutes * 60;
+        strcpy(statusMsg, "Warm-up");
+        if (now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
+          rfStart(RF_UP, stepSizeSignals, 200, 5);
+          phaseTimer = now;
+          phaseTotalSec = stepSizeSignals * 200 / 1000;
+          if (phaseTotalSec < 1) phaseTotalSec = 1;
+          speedTenths += stepSizeSignals;
+          Serial.println("warm-up done, entering fast interval");
+          strcpy(statusMsg, "Speeding");
+        }
       }
       break;
 
     case 5:
-      if (now - phaseTimer >= PHASE_DURATION_MS) {
-        rfStart(RF_DOWN, stepSizeSignals, 200, 6);
-        phaseTimer = now;
-        if (speedTenths >= stepSizeSignals)
-          speedTenths -= stepSizeSignals;
-        else
-          speedTenths = 0;
-        Serial.println("fast interval done, entering slow interval");
-        strcpy(statusMsg, "Slow");
+      if (!rfBusy) {
+        phaseTotalSec = phaseDurationMinutes * 60;
+        strcpy(statusMsg, "Fast");
+        if (now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
+          rfStart(RF_DOWN, stepSizeSignals, 200, 6);
+          phaseTimer = now;
+          phaseTotalSec = stepSizeSignals * 200 / 1000;
+          if (phaseTotalSec < 1) phaseTotalSec = 1;
+          if (speedTenths >= stepSizeSignals)
+            speedTenths -= stepSizeSignals;
+          else
+            speedTenths = 0;
+          Serial.println("fast interval done, entering slow interval");
+          strcpy(statusMsg, "Slowing");
+        }
       }
       break;
 
     case 6:
-      if (now - phaseTimer >= PHASE_DURATION_MS) {
+      if (!rfBusy) {
+        phaseTotalSec = phaseDurationMinutes * 60;
+        strcpy(statusMsg, "Slow");
+      }
+      if (!rfBusy && now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
         if (intervalPair < INTERVAL_PAIRS - 1) {
           rfStart(RF_UP, stepSizeSignals, 200, 5);
           phaseTimer = now;
+          phaseTotalSec = stepSizeSignals * 200 / 1000;
+          if (phaseTotalSec < 1) phaseTotalSec = 1;
           speedTenths += stepSizeSignals;
           intervalPair++;
           Serial.print("slow interval done, cycle ");
           Serial.print(intervalPair);
           Serial.println("/5 entering fast interval");
-          strcpy(statusMsg, "Fast");
+          strcpy(statusMsg, "Speeding");
         } else {
           if (cooldownEnabled) {
             rfStart(RF_DOWN, 40, 200, 8);
+            phaseTimer = now;
             if (speedTenths >= 40)
               speedTenths -= 40;
             else
@@ -205,22 +229,25 @@ void runWalkSequence(unsigned long now) {
           strcpy(statusMsg, "Cooling");
           walkPhase = 7;
           phaseTimer = now;
+          phaseTotalSec = 0;
           Serial.println("slow interval done, entering cooldown");
         }
       }
       break;
 
     case 7:
-      // Display shows "Cooldown..." (via display.cpp walkPhase==7 check)
+      phaseTotalSec = 0;
       // rfProcess sends the 40 RF_DOWN signals in loop()
       // When done, rfProcess sets walkPhase = rfNextPhase (8)
       if (!rfBusy) {
         walkPhase = 8;
         phaseTimer = now;
+        phaseTotalSec = 3;
       }
       break;
 
     case 8:
+      phaseTotalSec = 3;
       if (now - phaseTimer >= 3000) {
         Serial.println("=== internal walking done ===");
         walkActive = false;

@@ -3,9 +3,10 @@
 
 extern bool displayAvailable;
 extern unsigned long phaseTimer;
+extern int phaseTotalSec;
 
 void initDisplay();
 void updateDisplay(const char* status, int speedTenths, int walkPhase, int intervalPair, unsigned long now);
-void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal);
+void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal, int phaseMin);
 
 #endif

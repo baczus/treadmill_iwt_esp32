@@ -1,7 +1,7 @@
 # Projekt: Interwałowy chód na bieżni (ESP32)
 
 Sterownik do bieżni elektrycznej (Kettler) oparty na ESP32. Komunikacja z bieżnią przez
-433 MHz ASK/OOK (biblioteka RCSwitch). Wyświetlacz OLED SSD1306 128×32 (I2C, adres 0x3C, SSD1306,
+433 MHz ASK/OOK (biblioteka RCSwitch). Wyświetlacz OLED SSD1306 128×64 (I2C, adres 0x3C, SSD1306,
 piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 
 ## Założenia
@@ -44,10 +44,11 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 | `START_SPEED_TENTHS` | 1 | Speed after START (km/h) |
 | `INTERVAL_PAIRS` | 5 | Fast+Slow interval pairs |
 | `PHASE_DURATION_MS` | 180000 | Duration per interval phase (ms) |
-| `stepSizeSignals` | 35 (NVS) | Speed change per interval (3.5 km/h) |
+| `stepSizeSignals` | 35 (NVS) | Speed change per interval (3.5 km/h, step 0.1) |
 | `baseTenths` | 40 (NVS) | Base/warmup speed (4.0 km/h) |
 | `stopBeforeStart` | 1 (NVS) | Send RF_STOP before starting sequence |
 | `cooldownEnabled` | 1 (NVS) | Enable rapid slowdown phase at the end |
+| `phaseDurationMinutes` | 3 (NVS) | Duration per interval phase (minutes) |
 
 ## Pin mapping
 
@@ -60,17 +61,17 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 | 26 | `PIN_BTN_DOWN` | input pullup |
 | 33 | `PIN_BTN_UP` | input pullup |
 
-## Display layout (128×32 OLED, 4 rows)
+## Display layout (128×64 OLED)
 
 ```
-Row 0:  ~~~ IWT ~~~              (centered x=31)
-Row 1:  <statusMsg>               (x=0, len ≤ 21 chars)
-Row 2:  Speed: X.X km/h           (x=0)
-Row 3:  <phase-dependent text>    (x=0)
-        ▓▓░░░░░░░░  progress bar  (y=29, 3px tall)
+Row 0:  ~~~ IWT ~~~              (y=0,  size 1, centered)
+Row 1:  ▓▓▓░░░░░  progress       (y=10, 5px tall, full-width)
+Row 2:  <statusMsg>               (y=18, size 2, big)
+Row 3:  X.X km/h                  (y=36, size 2, big)
+Row 4:  <phase-dependent text>    (y=56, size 1)
 ```
 
-**Row 3 content per phase:**
+**Row 4 content per phase:**
 | Phase | Text | Progress bar |
 |---|---|---|
 | 1 | – | – |
@@ -81,7 +82,20 @@ Row 3:  <phase-dependent text>    (x=0)
 | 7 | `Cooldown...` | – |
 | 8 | `Complete!` | ✓ (3s) |
 
-Progress bar is a filled rectangle at y=29 (height=3), proportional to `elapsed / totalSec`.
+Progress bar is a full-width bordered rectangle at y=10 (height=5), proportional to `elapsed / totalSec`.
+
+## Menu display (128×64 OLED, 2 items at a time, size 2)
+
+```
+Page 0 (Step, Base):                  Page 1 (Stop, Cool):              Page 2 (Time):
+ ~~ Settings ~~     (y=0,  s1)         ~~ Settings ~~     (y=0,  s1)      ~~ Settings ~~     (y=0,  s1)
+ >Step 3.5          (y=12, s2)         >Stop On           (y=12, s2)      >Time 3m           (y=12, s2)
+  Base 4.0          (y=30, s2)          Cool On           (y=30, s2)      (empty)            (y=30, s2)
+ [OK] [Hold=Exit]   (y=50, s1)         [OK] [Hold=Exit]   (y=50, s1)      [OK] [Hold=Exit]   (y=50, s1)
+```
+
+Three pages, toggled automatically as selection moves. Items: Step (0.1 km/h), Base (0.1 km/h), Stop (On/Off), Cool (On/Off), Time (minutes).
+Selected item prefixed with `>` (browse) or wrapped in `*...*` (edit).
 
 ## State machine rules
 
@@ -119,10 +133,11 @@ Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter set
 **Settings stored in ESP32 NVS (Preferences):**
 | Setting | Variable | Default | Range | Step |
 |---|---|---|---|---|
-| `Step` | `stepSizeSignals` | 35 (3.5 km/h) | 5–80 (0.5–8.0) | 5 (0.5 km/h) |
+| `Step` | `stepSizeSignals` | 35 (3.5 km/h) | 1–80 (0.1–8.0) | 1 (0.1 km/h) |
 | `Base` | `baseTenths` | 40 (4.0 km/h) | 10–100 (1.0–10.0) | 1 (0.1 km/h) |
 | `Stop` | `stopBeforeStart` | 1 (On) | 0–1 (Off/On) | toggle |
 | `Cool` | `cooldownEnabled` | 1 (On) | 0–1 (Off/On) | toggle |
+| `Time` | `phaseDurationMinutes` | 3 (3 min) | 1–10 (min) | 1 (min) |
 
 ## Files
 

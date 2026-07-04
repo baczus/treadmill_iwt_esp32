@@ -7,6 +7,7 @@ extern int stepSizeSignals;
 extern int baseTenths;
 extern int stopBeforeStart;
 extern int cooldownEnabled;
+extern int phaseDurationMinutes;
 
 void settingsInit();
 void settingsSave();

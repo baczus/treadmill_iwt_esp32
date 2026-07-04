@@ -7,6 +7,7 @@ int stepSizeSignals = 35;
 int baseTenths = 40;
 int stopBeforeStart = 1;
 int cooldownEnabled = 1;
+int phaseDurationMinutes = 3;
 
 static Preferences prefs;
 
@@ -14,12 +15,12 @@ static bool menuActive = false;
 static bool menuEditMode = false;
 static int menuSelection = 0;
 
-static const int MENU_ITEM_COUNT = 4;
-static const char* const MENU_NAMES[MENU_ITEM_COUNT] = {"Step", "Base", "Stop", "Cool"};
-static int* const MENU_VALUES[MENU_ITEM_COUNT] = {&stepSizeSignals, &baseTenths, &stopBeforeStart, &cooldownEnabled};
-static const int MENU_MIN[MENU_ITEM_COUNT] = {5, 10, 0, 0};
-static const int MENU_MAX[MENU_ITEM_COUNT] = {80, 100, 1, 1};
-static const int MENU_STEP[MENU_ITEM_COUNT] = {5, 1, 1, 1};
+static const int MENU_ITEM_COUNT = 5;
+static const char* const MENU_NAMES[MENU_ITEM_COUNT] = {"Step", "Base", "Stop", "Cool", "Time"};
+static int* const MENU_VALUES[MENU_ITEM_COUNT] = {&stepSizeSignals, &baseTenths, &stopBeforeStart, &cooldownEnabled, &phaseDurationMinutes};
+static const int MENU_MIN[MENU_ITEM_COUNT] = {1, 10, 0, 0, 1};
+static const int MENU_MAX[MENU_ITEM_COUNT] = {80, 100, 1, 1, 10};
+static const int MENU_STEP[MENU_ITEM_COUNT] = {1, 1, 1, 1, 1};
 
 static unsigned long menuOpenTime = 0;
 static unsigned long menuExitTime = 0;
@@ -30,10 +31,11 @@ bool menuCanOpen(unsigned long now) {
 
 void settingsInit() {
   prefs.begin("treadmill", true);
-  stepSizeSignals = prefs.getInt("stepSig", 35);
-  baseTenths      = prefs.getInt("baseSpd", 40);
-  stopBeforeStart = prefs.getInt("stopBef", 1);
-  cooldownEnabled = prefs.getInt("coolEn", 1);
+  stepSizeSignals     = prefs.getInt("stepSig", 35);
+  baseTenths          = prefs.getInt("baseSpd", 40);
+  stopBeforeStart     = prefs.getInt("stopBef", 1);
+  cooldownEnabled     = prefs.getInt("coolEn", 1);
+  phaseDurationMinutes = prefs.getInt("phaseMin", 3);
   prefs.end();
 }
 
@@ -43,6 +45,7 @@ void settingsSave() {
   prefs.putInt("baseSpd", baseTenths);
   prefs.putInt("stopBef", stopBeforeStart);
   prefs.putInt("coolEn", cooldownEnabled);
+  prefs.putInt("phaseMin", phaseDurationMinutes);
   prefs.end();
 }
 
@@ -67,14 +70,22 @@ static void menuBrowseDown() {
 
 static void menuEditUp() {
   int* v = MENU_VALUES[menuSelection];
-  *v += MENU_STEP[menuSelection];
-  if (*v > MENU_MAX[menuSelection]) *v = MENU_MAX[menuSelection];
+  if (MENU_MIN[menuSelection] == 0 && MENU_MAX[menuSelection] == 1) {
+    *v = (*v == 0) ? 1 : 0;
+  } else {
+    *v += MENU_STEP[menuSelection];
+    if (*v > MENU_MAX[menuSelection]) *v = MENU_MAX[menuSelection];
+  }
 }
 
 static void menuEditDown() {
   int* v = MENU_VALUES[menuSelection];
-  *v -= MENU_STEP[menuSelection];
-  if (*v < MENU_MIN[menuSelection]) *v = MENU_MIN[menuSelection];
+  if (MENU_MIN[menuSelection] == 0 && MENU_MAX[menuSelection] == 1) {
+    *v = (*v == 0) ? 1 : 0;
+  } else {
+    *v -= MENU_STEP[menuSelection];
+    if (*v < MENU_MIN[menuSelection]) *v = MENU_MIN[menuSelection];
+  }
 }
 
 void menuProcess(unsigned long now) {
@@ -106,5 +117,5 @@ void menuProcess(unsigned long now) {
     if (evDown == SHORT_PRESS) menuBrowseDown();
   }
 
-  updateMenuDisplay(menuEditMode, menuSelection, stepSizeSignals, baseTenths, stopBeforeStart, cooldownEnabled);
+  updateMenuDisplay(menuEditMode, menuSelection, stepSizeSignals, baseTenths, stopBeforeStart, cooldownEnabled, phaseDurationMinutes);
 }

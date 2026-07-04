@@ -3,9 +3,10 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "display.h"
+#include "settings.h"
 
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
+#define SCREEN_HEIGHT 64
 #define OLED_RESET    -1
 #define OLED_ADDRESS  0x3C
 
@@ -40,99 +41,101 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
 
   display.clearDisplay();
 
+  display.setTextSize(1);
   display.setCursor(31, 0);
   display.print("~~~ IWT ~~~");
 
-  display.setCursor(0, 8);
-  display.print(status);
-
-  int barX = 50;
-  int barY = 8;
-  int barH = 8;
-
-  int totalSec = 0;
-  switch (walkPhase) {
-    case 2: totalSec = 20; break;
-    case 3: totalSec = 10; break;
-    case 4: case 5: case 6: totalSec = 180; break;
-    case 8: totalSec = 3; break;
+  int totalSec = phaseTotalSec;
+  if (totalSec == 0) {
+    switch (walkPhase) {
+      case 2: totalSec = 20; break;
+      case 8: totalSec = 3; break;
+    }
   }
 
   if (totalSec > 0) {
-    display.drawFastVLine(barX, barY, barH, SSD1306_WHITE);
-    display.drawFastVLine(SCREEN_WIDTH - 1, barY, barH, SSD1306_WHITE);
-
     int elapsed = (now - phaseTimer) / 1000;
     if (elapsed > totalSec) elapsed = totalSec;
-    int fillable = SCREEN_WIDTH - barX - 2;
-    int filled = fillable * elapsed / totalSec;
-    display.fillRect(barX + 1, barY, filled, barH, SSD1306_WHITE);
+    int filled = (SCREEN_WIDTH - 2) * elapsed / totalSec;
+    display.drawRect(0, 10, SCREEN_WIDTH, 5, SSD1306_WHITE);
+    display.fillRect(1, 11, filled, 3, SSD1306_WHITE);
   }
 
-  display.setCursor(0, 16);
-  display.print("Speed: ");
+  display.setTextSize(2);
+  display.setCursor(0, 18);
+  display.print(status);
+
+  display.setCursor(0, 36);
   display.print(speedTenths / 10);
   display.print(".");
   display.print(speedTenths % 10);
   display.print(" km/h");
 
+  display.setTextSize(1);
   if (walkPhase >= 5 && walkPhase <= 6) {
-    display.setCursor(0, 24);
+    display.setCursor(0, 56);
     display.print("Cycle: ");
     display.print(intervalPair + 1);
     display.print("/");
     display.print(5);
   } else if (walkPhase == 7) {
-    display.setCursor(0, 24);
+    display.setCursor(0, 56);
     display.print("Cooldown...");
   } else if (walkPhase == 8) {
-    display.setCursor(0, 24);
+    display.setCursor(0, 56);
     display.print("Complete!");
   }
 
   display.display();
 }
 
-void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal) {
+void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal, int phaseMin) {
   if (!displayAvailable) return;
 
   display.clearDisplay();
+
+  display.setTextSize(1);
   display.setCursor(22, 0);
   display.print("~~ Settings ~~");
 
   struct Item { const char* name; int val; int fmt; };
-  Item items[4] = {{"Step", stepVal, 0}, {"Base", baseVal, 0}, {"Stop", stopVal, 1}, {"Cool", coolVal, 1}};
+  Item items[5] = {{"Step", stepVal, 0}, {"Base", baseVal, 0}, {"Stop", stopVal, 1}, {"Cool", coolVal, 1}, {"Time", phaseMin, 2}};
 
-  display.setCursor(0, 8);
-  if (editMode) {
-    display.print("*");
-  } else {
-    display.print(">");
-  }
-  display.print(items[selection].name);
-  display.print(": ");
-  if (items[selection].fmt == 0) {
-    display.print(items[selection].val / 10);
-    display.print(".");
-    display.print(items[selection].val % 10);
-    display.print(" km/h");
-  } else {
-    display.print(items[selection].val ? "On " : "Off");
-  }
-  if (editMode) {
-    display.print("*");
+  int page = selection / 2;
+  int startIdx = page * 2;
+
+  display.setTextSize(2);
+  for (int i = 0; i < 2 && startIdx + i < 5; i++) {
+    int idx = startIdx + i;
+    int y = 12 + i * 18;
+    display.setCursor(0, y);
+
+    if (idx == selection) {
+      display.print(editMode ? "*" : ">");
+    } else {
+      display.print(" ");
+    }
+
+    display.print(items[idx].name);
+    display.print(" ");
+    if (items[idx].fmt == 0) {
+      display.print(items[idx].val / 10);
+      display.print(".");
+      display.print(items[idx].val % 10);
+    } else if (items[idx].fmt == 1) {
+      display.print(items[idx].val ? "On" : "Off");
+    } else {
+      display.print(items[idx].val);
+      display.print("m");
+    }
+
+    if (idx == selection && editMode) {
+      display.print("*");
+    }
   }
 
-  if (selection > 0) {
-    display.setCursor(108, 8);
-    display.print("^");
-  }
-  if (selection < 3) {
-    display.setCursor(120, 8);
-    display.print("v");
-  }
-
-  display.setCursor(0, 24);
+  display.setTextSize(1);
+  display.setCursor(0, 50);
   if (editMode) {
     display.print("[OK=save]");
   } else {
