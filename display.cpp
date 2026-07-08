@@ -5,6 +5,9 @@
 #include "display.h"
 #include "settings.h"
 
+extern int rampProgress;
+extern int rampActive;
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    -1
@@ -54,9 +57,14 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
   }
 
   if (totalSec > 0) {
-    int elapsed = (now - phaseTimer) / 1000;
-    if (elapsed > totalSec) elapsed = totalSec;
-    int filled = (SCREEN_WIDTH - 2) * elapsed / totalSec;
+    int filled;
+    if (rampActive) {
+      filled = (SCREEN_WIDTH - 2) * rampProgress / 100;
+    } else {
+      int elapsed = (now - phaseTimer) / 1000;
+      if (elapsed > totalSec) elapsed = totalSec;
+      filled = (SCREEN_WIDTH - 2) * elapsed / totalSec;
+    }
     display.drawRect(0, 10, SCREEN_WIDTH, 5, SSD1306_WHITE);
     display.fillRect(1, 11, filled, 3, SSD1306_WHITE);
   }
