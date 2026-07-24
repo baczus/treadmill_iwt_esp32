@@ -106,15 +106,27 @@ int getDisplaySpeedTenths() {
   return speedTenths;
 }
 
+// Test mode: send a RF_DOWN signal every 5 seconds to verify the transmitter.
+// Uncomment the line below to enable, comment out to disable.
+// #define TEST_SPEED_DOWN
+
+#ifdef TEST_SPEED_DOWN
+static unsigned long testDownTimer = 0;
+#endif
+
 void setup() {
   Serial.begin(115200);
+  Serial.println("boot");
+#ifdef TEST_SPEED_DOWN
+  while (!Serial) delay(50);
+#endif
 
   settingsInit();
   initDisplay();
   initButtons();
   updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, 0);
 
-  tx.enableTransmit(14);
+  tx.enableTransmit(0);
   tx.setProtocol(1);
   tx.setPulseLength(425);
   tx.setRepeatTransmit(3);
@@ -125,7 +137,24 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+#ifdef TEST_SPEED_DOWN
+  static unsigned long hb = 0;
+  if (now - hb >= 1000) {
+    Serial.println("loop alive");
+    hb = now;
+  }
+#endif
+
   rfProcess(now);
+
+#ifdef TEST_SPEED_DOWN
+  if (now - testDownTimer >= 5000) {
+    tx.setPulseLength(425);
+    tx.send(RF_DOWN, 24);
+    Serial.println("TEST: speed down");
+    testDownTimer = now;
+  }
+#endif
 
   if (menuIsActive()) {
     menuProcess(now);

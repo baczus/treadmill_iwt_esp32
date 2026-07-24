@@ -17,7 +17,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool displayAvailable = false;
 
 void initDisplay() {
-  Wire.begin(21, 22);
+  Wire.begin(8, 9);
   delay(100);
 
   Wire.beginTransmission(OLED_ADDRESS);
@@ -31,6 +31,7 @@ void initDisplay() {
     return;
   }
 
+  display.setRotation(2);
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.clearDisplay();
