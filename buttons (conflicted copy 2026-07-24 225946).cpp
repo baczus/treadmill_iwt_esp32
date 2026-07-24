@@ -1,6 +1,6 @@
 #include "buttons.h"
 
-static const int PINS[] = {33, 26, 25};
+static const int PINS[] = {7, 5, 6};
 static const unsigned long DEBOUNCE_MS = 30;
 static const unsigned long LONG_PRESS_MS = 3000;
 
