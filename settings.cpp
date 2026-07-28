@@ -5,7 +5,7 @@
 
 int stepSizeSignals = 35;
 int baseTenths = 40;
-int stopBeforeStart = 1;
+int startMode = 0;
 int cooldownEnabled = 1;
 int phaseDurationMinutes = 3;
 
@@ -16,10 +16,10 @@ static bool menuEditMode = false;
 static int menuSelection = 0;
 
 static const int MENU_ITEM_COUNT = 5;
-static const char* const MENU_NAMES[MENU_ITEM_COUNT] = {"Step", "Base", "Stop", "Cool", "Time"};
-static int* const MENU_VALUES[MENU_ITEM_COUNT] = {&stepSizeSignals, &baseTenths, &stopBeforeStart, &cooldownEnabled, &phaseDurationMinutes};
+static const char* const MENU_NAMES[MENU_ITEM_COUNT] = {"Step", "Base", "Mode", "Cool", "Time"};
+static int* const MENU_VALUES[MENU_ITEM_COUNT] = {&stepSizeSignals, &baseTenths, &startMode, &cooldownEnabled, &phaseDurationMinutes};
 static const int MENU_MIN[MENU_ITEM_COUNT] = {1, 10, 0, 0, 1};
-static const int MENU_MAX[MENU_ITEM_COUNT] = {80, 100, 1, 1, 10};
+static const int MENU_MAX[MENU_ITEM_COUNT] = {80, 100, 2, 1, 10};
 static const int MENU_STEP[MENU_ITEM_COUNT] = {1, 1, 1, 1, 1};
 
 static unsigned long menuOpenTime = 0;
@@ -33,7 +33,7 @@ void settingsInit() {
   prefs.begin("treadmill", true);
   stepSizeSignals     = prefs.getInt("stepSig", 35);
   baseTenths          = prefs.getInt("baseSpd", 40);
-  stopBeforeStart     = prefs.getInt("stopBef", 1);
+  startMode           = prefs.getInt("startM", 0);
   cooldownEnabled     = prefs.getInt("coolEn", 1);
   phaseDurationMinutes = prefs.getInt("phaseMin", 3);
   prefs.end();
@@ -43,7 +43,7 @@ void settingsSave() {
   prefs.begin("treadmill", false);
   prefs.putInt("stepSig", stepSizeSignals);
   prefs.putInt("baseSpd", baseTenths);
-  prefs.putInt("stopBef", stopBeforeStart);
+  prefs.putInt("startM", startMode);
   prefs.putInt("coolEn", cooldownEnabled);
   prefs.putInt("phaseMin", phaseDurationMinutes);
   prefs.end();
@@ -117,5 +117,5 @@ void menuProcess(unsigned long now) {
     if (evDown == SHORT_PRESS) menuBrowseDown();
   }
 
-  updateMenuDisplay(menuEditMode, menuSelection, stepSizeSignals, baseTenths, stopBeforeStart, cooldownEnabled, phaseDurationMinutes);
+  updateMenuDisplay(menuEditMode, menuSelection, stepSizeSignals, baseTenths, startMode, cooldownEnabled, phaseDurationMinutes);
 }

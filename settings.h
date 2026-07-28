@@ -5,7 +5,7 @@
 
 extern int stepSizeSignals;
 extern int baseTenths;
-extern int stopBeforeStart;
+extern int startMode;
 extern int cooldownEnabled;
 extern int phaseDurationMinutes;
 

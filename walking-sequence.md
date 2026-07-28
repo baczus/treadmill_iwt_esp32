@@ -19,18 +19,31 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 - Jeśli wyświetlacz nie odpowiada (brak urządzenia na 0x3C), program działa bez niego
 - Wysyłka RF jest nieblokująca (`rfStart()`/`rfProcess()` w głównej pętli), wyświetlacz nie zamarza podczas TX
 
-# Walking Sequence – State Machine (8 phases)
+# Walking Sequence – State Machine
+
+## Start modes
+
+The `Mode` setting (menu) controls how the sequence starts:
+
+| Mode | Entry phase | Description |
+|---|---|---|
+| 0 – Stop | Phase 1 | Send `RF_STOP`, wait 20s, send `RF_START`, ramp up (original behaviour) |
+| 1 – Ramp | Phase 0 | Slow down from current speed to 1.0 km/h via `RF_DOWN`, then ramp up |
+| 2 – Skip | Phase 4 | Skip preamble — jump straight to warm-up (assumes speed is already at base) |
+
+## Phases
 
 | Phase | Action | Duration | Speed (km/h) | statusMsg (row 1) | Row 3 |
 |---|---|---|---|---|---|
-| 1 – STOP | send `RF_STOP` | instant | 0 | `Init` | — |
-| 2 – START | wait 20s, send `RF_START` | 20s | 1.0 | `Starting` | — |
+| 0 – SLOWDOWN | `RF_DOWN` from current → 1.0 km/h (Mode 1 only) | TX | →1.0 | `Slowing` | — |
+| 1 – STOP | send `RF_STOP` (Mode 0 only) | instant | 0 | `Init` | — |
+| 2 – START | wait 20s, send `RF_START` (Mode 0 only) | 20s | 1.0 | `Starting` | — |
 | 3 – RAMP | wait 10s, ramp 1→base | 10s + TX | **base** | →`Warm-up` | — |
-| 4 – WARMUP | wait 3 min | 3 min | **base** | `Warm-up` | — |
+| 4 – WARMUP | wait N min | N min | **base** | `Warm-up` | — |
 | 4→5 | `+stepSizeSignals` | TX | **base+step** | →`Fast` | — |
-| 5 – FAST | wait 3 min | 3 min | **base+step** | `Fast` | `Cycle: X/5` |
+| 5 – FAST | wait N min | N min | **base+step** | `Fast` | `Cycle: X/5` |
 | 5→6 | `−stepSizeSignals` | TX | **base** | →`Slow` | — |
-| 6 – SLOW | wait 3 min | 3 min | **base** | `Slow` | `Cycle: X/5` |
+| 6 – SLOW | wait N min | N min | **base** | `Slow` | `Cycle: X/5` |
 | 6→5 *(×4)* | `+stepSizeSignals` | TX | **base+step** | →`Fast` | cycle 2/5…5/5 |
 | 6→7 (exit) | — | — | — | →`Cooling` | — |
 | 7 – COOLDOWN | rapid slowdown (−40 sig, if enabled) | ~8s TX | →0 | `Cooling` | `Cooldown...` |
@@ -46,7 +59,7 @@ piny 21/22) do prezentacji statusu, prędkości i numeru cyklu.
 | `PHASE_DURATION_MS` | 180000 | Duration per interval phase (ms) |
 | `stepSizeSignals` | 35 (NVS) | Speed change per interval (3.5 km/h, step 0.1) |
 | `baseTenths` | 40 (NVS) | Base/warmup speed (4.0 km/h) |
-| `stopBeforeStart` | 1 (NVS) | Send RF_STOP before starting sequence |
+| `startMode` | 0 (NVS) | Start mode: 0=Stop, 1=Ramp, 2=Skip |
 | `cooldownEnabled` | 1 (NVS) | Enable rapid slowdown phase at the end |
 | `phaseDurationMinutes` | 3 (NVS) | Duration per interval phase (minutes) |
 
@@ -74,11 +87,12 @@ Row 4:  <phase-dependent text>    (y=56, size 1)
 **Row 4 content per phase:**
 | Phase | Text | Progress bar |
 |---|---|---|
+| 0 | – | ✓ (TX) |
 | 1 | – | – |
 | 2 | – | ✓ (20s) |
 | 3 | – | ✓ (10s) |
-| 4 | – | ✓ (3 min) |
-| 5-6 | `Cycle: X/5` | ✓ (3 min) |
+| 4 | – | ✓ (N min) |
+| 5-6 | `Cycle: X/5` | ✓ (N min) |
 | 7 | `Cooldown...` | – |
 | 8 | `Complete!` | ✓ (3s) |
 
@@ -87,19 +101,19 @@ Progress bar is a full-width bordered rectangle at y=10 (height=5), proportional
 ## Menu display (128×64 OLED, 2 items at a time, size 2)
 
 ```
-Page 0 (Step, Base):                  Page 1 (Stop, Cool):              Page 2 (Time):
+Page 0 (Step, Base):                  Page 1 (Mode, Cool):              Page 2 (Time):
  ~~ Settings ~~     (y=0,  s1)         ~~ Settings ~~     (y=0,  s1)      ~~ Settings ~~     (y=0,  s1)
- >Step 3.5          (y=12, s2)         >Stop On           (y=12, s2)      >Time 3m           (y=12, s2)
+ >Step 3.5          (y=12, s2)         >Mode Stop         (y=12, s2)      >Time 3m           (y=12, s2)
   Base 4.0          (y=30, s2)          Cool On           (y=30, s2)      (empty)            (y=30, s2)
  [OK] [Hold=Exit]   (y=50, s1)         [OK] [Hold=Exit]   (y=50, s1)      [OK] [Hold=Exit]   (y=50, s1)
 ```
 
-Three pages, toggled automatically as selection moves. Items: Step (0.1 km/h), Base (0.1 km/h), Stop (On/Off), Cool (On/Off), Time (minutes).
+Three pages, toggled automatically as selection moves. Items: Step (0.1 km/h), Base (0.1 km/h), Mode (Stop/Ramp/Skip), Cool (On/Off), Time (minutes).
 Selected item prefixed with `>` (browse) or wrapped in `*...*` (edit).
 
 ## State machine rules
 
-- `walkPhase == 0` = idle, `walkPhase == 1..8` = walking active
+- `walkPhase == 0` and `walkActive == false` = idle; `walkPhase == 0` with `walkActive == true` = Mode 1 slowdown (Phase 0)
 - Each phase sets `statusMsg` for the **next** phase at transition
 - RF sending is non-blocking: `rfStart(queue)` schedules signals, `rfProcess()` in `loop()` sends one per call (with ~163ms interval)
 - `intervalPair` starts at 0 after ramp, increments in phase 6 loop (condition `intervalPair < INTERVAL_PAIRS - 1`)
@@ -121,7 +135,7 @@ Selected item prefixed with `>` (browse) or wrapped in `*...*` (edit).
 Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter settings.
 
 **Browse mode** (default on entry):
-- UP/DOWN → select between `Step`, `Base`, `Stop`, `Cool`
+- UP/DOWN → select between `Step`, `Base`, `Mode`, `Cool`
 - Short-press START → enter edit mode
 - Long-press START (5s) → save all, exit
 
@@ -135,7 +149,7 @@ Hold `PIN_BTN_START` for 5s (only when idle, `walkActive == false`) to enter set
 |---|---|---|---|---|
 | `Step` | `stepSizeSignals` | 35 (3.5 km/h) | 1–80 (0.1–8.0) | 1 (0.1 km/h) |
 | `Base` | `baseTenths` | 40 (4.0 km/h) | 10–100 (1.0–10.0) | 1 (0.1 km/h) |
-| `Stop` | `stopBeforeStart` | 1 (On) | 0–1 (Off/On) | toggle |
+| `Mode` | `startMode` | 0 (Stop) | 0–2 (Stop/Ramp/Skip) | 1 |
 | `Cool` | `cooldownEnabled` | 1 (On) | 0–1 (Off/On) | toggle |
 | `Time` | `phaseDurationMinutes` | 3 (3 min) | 1–10 (min) | 1 (min) |
 

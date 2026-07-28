@@ -43,6 +43,7 @@ void initDisplay() {
 void updateDisplay(const char* status, int speedTenths, int walkPhase, int intervalPair, unsigned long now) {
   if (!displayAvailable) return;
 
+  display.setRotation(2);
   display.clearDisplay();
 
   display.setTextSize(1);
@@ -101,6 +102,7 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
 void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal, int phaseMin) {
   if (!displayAvailable) return;
 
+  display.setRotation(2);
   display.clearDisplay();
 
   display.setTextSize(1);
@@ -108,7 +110,7 @@ void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, i
   display.print("~~ Settings ~~");
 
   struct Item { const char* name; int val; int fmt; };
-  Item items[5] = {{"Step", stepVal, 0}, {"Base", baseVal, 0}, {"Stop", stopVal, 1}, {"Cool", coolVal, 1}, {"Time", phaseMin, 2}};
+  Item items[5] = {{"Step", stepVal, 0}, {"Base", baseVal, 0}, {"Mode", stopVal, 3}, {"Cool", coolVal, 1}, {"Time", phaseMin, 2}};
 
   int page = selection / 2;
   int startIdx = page * 2;
@@ -133,6 +135,12 @@ void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, i
       display.print(items[idx].val % 10);
     } else if (items[idx].fmt == 1) {
       display.print(items[idx].val ? "On" : "Off");
+    } else if (items[idx].fmt == 3) {
+      const char* modes[] = {"Stop", "Ramp", "Skip"};
+      int m = items[idx].val;
+      if (m < 0) m = 0;
+      if (m > 2) m = 2;
+      display.print(modes[m]);
     } else {
       display.print(items[idx].val);
       display.print("m");

@@ -171,25 +171,83 @@ void loop() {
   } else if (evStart == SHORT_PRESS) {
     if (!walkActive) {
       walkActive = true;
-      walkPhase = stopBeforeStart ? 1 : 2;
+      intervalPair = 0;
       phaseTimer = now;
-      speedTenths = 0;
       strcpy(statusMsg, "Init");
+      switch (startMode) {
+        case 0:
+          walkPhase = 1;
+          speedTenths = 0;
+          break;
+        case 1:
+          walkPhase = 0;
+          break;
+        case 2:
+          walkPhase = 4;
+          speedTenths = baseTenths;
+          phaseTimer = now - 1;
+          Serial.println("startMode=2: skip to warm-up at base speed");
+          break;
+      }
       Serial.println("=== internal walking started ===");
     } else {
       stopRequested = true;
     }
   }
 
-  if (evUp == SHORT_PRESS) {
-    speedTenths++;
-    Serial.println("speed up");
-    tx.send(RF_UP, 24);
+  {
+    static bool prevUp = false;
+    static unsigned long repeatUp = 0;
+    static bool upFired = false;
+    bool heldUp = isButtonPressed(BTN_UP);
+
+    if (heldUp && !prevUp) {
+      speedTenths++;
+      tx.send(RF_UP, 24);
+      Serial.println("speed up");
+      repeatUp = now + 800;
+      upFired = true;
+    } else if (heldUp && now >= repeatUp) {
+      speedTenths++;
+      tx.send(RF_UP, 24);
+      Serial.println("speed up (repeat)");
+      repeatUp = now + 250;
+    }
+    if (evUp == SHORT_PRESS && !upFired) {
+      speedTenths++;
+      tx.send(RF_UP, 24);
+      Serial.println("speed up");
+    }
+    prevUp = heldUp;
+    if (!heldUp) upFired = false;
   }
-  if (evDown == SHORT_PRESS) {
-    if (speedTenths > 0) speedTenths--;
-    Serial.println("speed down");
-    tx.send(RF_DOWN, 24);
+  {
+    static bool prevDown = false;
+    static unsigned long repeatDown = 0;
+    static bool downFired = false;
+    bool heldDown = isButtonPressed(BTN_DOWN);
+
+    if (heldDown && !prevDown) {
+      if (speedTenths > 0) speedTenths--;
+      tx.send(RF_DOWN, 24);
+      Serial.println("speed down");
+      repeatDown = now + 800;
+      downFired = true;
+    } else if (heldDown && now >= repeatDown) {
+      if (speedTenths > 0) {
+        speedTenths--;
+        tx.send(RF_DOWN, 24);
+        Serial.println("speed down (repeat)");
+      }
+      repeatDown = now + 250;
+    }
+    if (evDown == SHORT_PRESS && !downFired) {
+      if (speedTenths > 0) speedTenths--;
+      tx.send(RF_DOWN, 24);
+      Serial.println("speed down");
+    }
+    prevDown = heldDown;
+    if (!heldDown) downFired = false;
   }
 
   if (walkActive) runWalkSequence(now);
@@ -204,6 +262,25 @@ void runWalkSequence(unsigned long now) {
     return;
   }
   switch (walkPhase) {
+    case 0:
+      if (!rfBusy) {
+        int downSignals = speedTenths - START_SPEED_TENTHS;
+        if (downSignals > 0) {
+          strcpy(statusMsg, "Slowing");
+          phaseTimer = now;
+          phaseTotalSec = downSignals * 200 / 1000;
+          if (phaseTotalSec < 1) phaseTotalSec = 1;
+          rfStart(RF_DOWN, downSignals, 200, 3);
+        } else {
+          intervalPair = 0;
+          speedTenths = START_SPEED_TENTHS;
+          walkPhase = 3;
+          phaseTimer = now;
+          phaseTotalSec = 10;
+        }
+      }
+      break;
+
     case 1:
       tx.setPulseLength(422);
       tx.send(RF_STOP, 24);
@@ -326,6 +403,7 @@ void runWalkSequence(unsigned long now) {
         Serial.println("=== internal walking done ===");
         walkActive = false;
         walkPhase = 0;
+        intervalPair = 0;
         speedTenths = 0;
         strcpy(statusMsg, "Ready");
       }
