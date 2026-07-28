@@ -126,7 +126,7 @@ void setup() {
   initButtons();
   updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, 0);
 
-  tx.enableTransmit(0);
+  tx.enableTransmit(1);
   tx.setProtocol(1);
   tx.setPulseLength(425);
   tx.setRepeatTransmit(3);
