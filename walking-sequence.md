@@ -23,6 +23,26 @@ piny 8/9) do prezentacji statusu, prędkości i numeru cyklu.
 
 # Walking Sequence – State Machine (8 phases)
 
+```mermaid
+stateDiagram-v2
+    [*] --> P1_STOP : START short press
+    P1_STOP --> P2_START : RF_STOP sent
+    P2_START --> P3_RAMP : after 20s, RF_START sent
+    P3_RAMP --> P4_WARMUP : ramp 1.0 → base (queued UP signals)
+    P3_RAMP --> P3_RAMP : TX in progress
+    P4_WARMUP --> P5_FAST : after N min, +step
+    P5_FAST --> P6_SLOW : after N min, −step
+    P6_SLOW --> P5_FAST : next pair, +step (until cycle 5/5)
+    P6_SLOW --> P7_COOLDOWN : all pairs done, −40 signals
+    P7_COOLDOWN --> P8_COMPLETE : queue drained
+    P8_COMPLETE --> [*] : after 3s, "Ready"
+    note right of P7_COOLDOWN
+        if Cool = Off:
+        skip slowdown,
+        go straight to complete
+    end note
+```
+
 | Phase | Action | Duration | Speed (km/h) | statusMsg (row 1) | Row 3 |
 |---|---|---|---|---|---|
 | 1 – STOP | send `RF_STOP` | instant | 0 | `Init` | — |
