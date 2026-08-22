@@ -1,4 +1,5 @@
 #include <RCSwitch.h>
+#include <cstdio>
 #include "display.h"
 #include "settings.h"
 #include "buttons.h"
@@ -23,6 +24,10 @@ bool stopRequested = false;
 int speedTenths = 0;
 
 char statusMsg[16] = "Ready";
+
+static void setStatus(const char* msg) {
+  snprintf(statusMsg, sizeof(statusMsg), "%s", msg);
+}
 
 // Non-blocking RF sender. Each call queues one command (one transmission per
 // signal); rfProcess() emits them from loop() spaced by `interval` ms.
@@ -89,6 +94,10 @@ static void rfProcess(unsigned long now) {
 // Abort the walking sequence: stop the treadmill and reset all state.
 static void stopWalk() {
   if (!walkActive && !stopRequested) return;
+  // Cancel any queued ramp, otherwise rfProcess keeps transmitting the
+  // remaining signals after the STOP and the treadmill speeds up again.
+  rfBusy = false;
+  rampActive = 0;
   tx.setPulseLength(422);
   tx.send(RF_STOP, 24);
   Serial.println("=== walking stopped by user ===");
@@ -97,7 +106,7 @@ static void stopWalk() {
   intervalPair = 0;
   speedTenths = 0;
   stopRequested = false;
-  strcpy(statusMsg, "Ready");
+  setStatus("Ready");
   phaseTimer = millis();
   phaseTotalSec = 0;
 }
@@ -106,25 +115,14 @@ int getDisplaySpeedTenths() {
   return speedTenths;
 }
 
-// Test mode: send a RF_DOWN signal every 5 seconds to verify the transmitter.
-// Uncomment the line below to enable, comment out to disable.
-// #define TEST_SPEED_DOWN
-
-#ifdef TEST_SPEED_DOWN
-static unsigned long testDownTimer = 0;
-#endif
-
 void setup() {
   Serial.begin(115200);
   Serial.println("boot");
-#ifdef TEST_SPEED_DOWN
-  while (!Serial) delay(50);
-#endif
 
   settingsInit();
   initDisplay();
   initButtons();
-  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, 0);
+  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, millis(), phaseTimer, phaseTotalSec);
 
   tx.enableTransmit(1);
   tx.setProtocol(1);
@@ -137,24 +135,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-#ifdef TEST_SPEED_DOWN
-  static unsigned long hb = 0;
-  if (now - hb >= 1000) {
-    Serial.println("loop alive");
-    hb = now;
-  }
-#endif
-
   rfProcess(now);
-
-#ifdef TEST_SPEED_DOWN
-  if (now - testDownTimer >= 5000) {
-    tx.setPulseLength(425);
-    tx.send(RF_DOWN, 24);
-    Serial.println("TEST: speed down");
-    testDownTimer = now;
-  }
-#endif
 
   if (menuIsActive()) {
     menuProcess(now);
@@ -162,8 +143,8 @@ void loop() {
     return;
   }
 
-  ButtonEvent evUp    = readButton(BTN_UP);
-  ButtonEvent evDown  = readButton(BTN_DOWN);
+  ButtonEvent evUp    = readButtonRepeat(BTN_UP);
+  ButtonEvent evDown  = readButtonRepeat(BTN_DOWN);
   ButtonEvent evStart = readButton(BTN_START);
 
   if (evStart == LONG_PRESS && !walkActive && menuCanOpen(now)) {
@@ -174,27 +155,29 @@ void loop() {
       walkPhase = stopBeforeStart ? 1 : 2;
       phaseTimer = now;
       speedTenths = 0;
-      strcpy(statusMsg, "Init");
+      setStatus("Init");
       Serial.println("=== internal walking started ===");
     } else {
       stopRequested = true;
     }
   }
 
-  if (evUp == SHORT_PRESS) {
+  if (evUp == SHORT_PRESS || evUp == REPEAT) {
     speedTenths++;
     Serial.println("speed up");
+    tx.setPulseLength(425);
     tx.send(RF_UP, 24);
   }
-  if (evDown == SHORT_PRESS) {
+  if (evDown == SHORT_PRESS || evDown == REPEAT) {
     if (speedTenths > 0) speedTenths--;
     Serial.println("speed down");
+    tx.setPulseLength(425);
     tx.send(RF_DOWN, 24);
   }
 
   if (walkActive) runWalkSequence(now);
 
-  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, now);
+  updateDisplay(statusMsg, getDisplaySpeedTenths(), walkPhase, intervalPair, now, phaseTimer, phaseTotalSec);
   delay(10);
 }
 
@@ -208,7 +191,7 @@ void runWalkSequence(unsigned long now) {
       tx.setPulseLength(422);
       tx.send(RF_STOP, 24);
       Serial.println("stop sent");
-      strcpy(statusMsg, "Init");
+      setStatus("Init");
       phaseTimer = now;
       walkPhase = 2;
       phaseTotalSec = 20;
@@ -219,7 +202,7 @@ void runWalkSequence(unsigned long now) {
         tx.setPulseLength(424);
         tx.send(RF_START, 24);
         Serial.println("start sent");
-        strcpy(statusMsg, "Starting");
+        setStatus("Starting");
         speedTenths = START_SPEED_TENTHS;
         phaseTimer = now;
         walkPhase = 3;
@@ -231,7 +214,7 @@ void runWalkSequence(unsigned long now) {
       if (now - phaseTimer >= 10000 && !rfBusy) {
         int rampSignals = baseTenths - START_SPEED_TENTHS;
         if (rampSignals > 0) {
-          strcpy(statusMsg, "Ramping");
+          setStatus("Ramping");
           phaseTimer = now;
           phaseTotalSec = rampSignals * 200 / 1000;
           if (phaseTotalSec < 1) phaseTotalSec = 1;
@@ -240,7 +223,7 @@ void runWalkSequence(unsigned long now) {
         } else {
           intervalPair = 0;
           speedTenths = baseTenths;
-          strcpy(statusMsg, "Warm-up");
+          setStatus("Warm-up");
           phaseTimer = now;
           walkPhase = 4;
           phaseTotalSec = phaseDurationMinutes * 60;
@@ -251,14 +234,14 @@ void runWalkSequence(unsigned long now) {
     case 4:
       if (!rfBusy) {
         phaseTotalSec = phaseDurationMinutes * 60;
-        strcpy(statusMsg, "Warm-up");
+        setStatus("Warm-up");
         if (now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
           rfStart(RF_UP, stepSizeSignals, 200, 5);
           phaseTimer = now;
           phaseTotalSec = stepSizeSignals * 200 / 1000;
           if (phaseTotalSec < 1) phaseTotalSec = 1;
           Serial.println("warm-up done, entering fast interval");
-          strcpy(statusMsg, "Speeding");
+          setStatus("Speeding");
         }
       }
       break;
@@ -266,14 +249,14 @@ void runWalkSequence(unsigned long now) {
     case 5:
       if (!rfBusy) {
         phaseTotalSec = phaseDurationMinutes * 60;
-        strcpy(statusMsg, "Fast");
+        setStatus("Fast");
         if (now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
           rfStart(RF_DOWN, stepSizeSignals, 200, 6);
           phaseTimer = now;
           phaseTotalSec = stepSizeSignals * 200 / 1000;
           if (phaseTotalSec < 1) phaseTotalSec = 1;
           Serial.println("fast interval done, entering slow interval");
-          strcpy(statusMsg, "Slowing");
+          setStatus("Slowing");
         }
       }
       break;
@@ -281,7 +264,7 @@ void runWalkSequence(unsigned long now) {
     case 6:
       if (!rfBusy) {
         phaseTotalSec = phaseDurationMinutes * 60;
-        strcpy(statusMsg, "Slow");
+        setStatus("Slow");
       }
       if (!rfBusy && now - phaseTimer >= (phaseDurationMinutes * 60000UL)) {
         if (intervalPair < INTERVAL_PAIRS - 1) {
@@ -293,7 +276,7 @@ void runWalkSequence(unsigned long now) {
           Serial.print("slow interval done, cycle ");
           Serial.print(intervalPair);
           Serial.println("/5 entering fast interval");
-          strcpy(statusMsg, "Speeding");
+          setStatus("Speeding");
         } else {
           if (cooldownEnabled) {
             rfStart(RF_DOWN, 40, 200, 8);
@@ -302,7 +285,7 @@ void runWalkSequence(unsigned long now) {
             speedTenths = 0;
           }
           Serial.println("slow interval done, entering cooldown");
-          strcpy(statusMsg, "Cooling");
+          setStatus("Cooling");
           walkPhase = 7;
           phaseTimer = now;
           phaseTotalSec = 0;
@@ -327,7 +310,7 @@ void runWalkSequence(unsigned long now) {
         walkActive = false;
         walkPhase = 0;
         speedTenths = 0;
-        strcpy(statusMsg, "Ready");
+        setStatus("Ready");
       }
       break;
   }

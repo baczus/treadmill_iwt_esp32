@@ -16,8 +16,45 @@ extern int rampActive;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool displayAvailable = false;
 
+// Redraw throttle: pushing a full 1KB framebuffer at loop rate (~100 Hz)
+// widens the window for I2C corruption (e.g. from RF bursts) for no visual
+// gain. 10 fps is plenty for this UI.
+static const unsigned long FRAME_INTERVAL_MS = 100;
+static unsigned long lastFrameMs = 0;
+
+// The classic "rows shifted / first line at bottom" symptom is the SSD1306
+// display-start-line register being corrupted by an I2C glitch. Re-send it
+// and verify the bus ACKs; if not, recover by re-initializing the panel.
+static bool ssd1306CheckBus() {
+  Wire.beginTransmission(OLED_ADDRESS);
+  Wire.write(0x00);           // command stream
+  Wire.write(0x40);           // display start line = 0
+  return Wire.endTransmission() == 0;
+}
+
+static void ssd1306Recover() {
+  Serial.println("OLED: bus glitch, re-initializing");
+  Wire.begin(8, 9);
+  delay(10);
+  // Clear any stuck transaction on the bus
+  Wire.beginTransmission(OLED_ADDRESS);
+  Wire.endTransmission();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("OLED recovery failed");
+    displayAvailable = false;
+    return;
+  }
+  display.setRotation(2);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.clearDisplay();
+  display.display();
+  displayAvailable = true;
+}
+
 void initDisplay() {
   Wire.begin(8, 9);
+  Wire.setTimeOut(50);
   delay(100);
 
   Wire.beginTransmission(OLED_ADDRESS);
@@ -40,7 +77,20 @@ void initDisplay() {
   displayAvailable = true;
 }
 
-void updateDisplay(const char* status, int speedTenths, int walkPhase, int intervalPair, unsigned long now) {
+// Flush the framebuffer at most every FRAME_INTERVAL_MS, then verify the
+// panel still ACKs with a sane start line; recover if it doesn't.
+static void flushFrame(unsigned long now) {
+  if (now - lastFrameMs < FRAME_INTERVAL_MS) return;
+  lastFrameMs = now;
+  display.display();
+  if (!ssd1306CheckBus()) {
+    delay(5);
+    if (!ssd1306CheckBus()) ssd1306Recover();
+  }
+}
+
+void updateDisplay(const char* status, int speedTenths, int walkPhase, int intervalPair,
+                   unsigned long now, unsigned long phaseStart, int phaseSec) {
   if (!displayAvailable) return;
 
   display.clearDisplay();
@@ -49,7 +99,7 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
   display.setCursor(31, 0);
   display.print("~~~ IWT ~~~");
 
-  int totalSec = phaseTotalSec;
+  int totalSec = phaseSec;
   if (totalSec == 0) {
     switch (walkPhase) {
       case 2: totalSec = 20; break;
@@ -62,7 +112,7 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
     if (rampActive) {
       filled = (SCREEN_WIDTH - 2) * rampProgress / 100;
     } else {
-      int elapsed = (now - phaseTimer) / 1000;
+      int elapsed = (now - phaseStart) / 1000;
       if (elapsed > totalSec) elapsed = totalSec;
       filled = (SCREEN_WIDTH - 2) * elapsed / totalSec;
     }
@@ -95,7 +145,7 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
     display.print("Complete!");
   }
 
-  display.display();
+  flushFrame(now);
 }
 
 void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal, int phaseMin) {
@@ -151,5 +201,5 @@ void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, i
     display.print("[OK] [Hold=Exit]");
   }
 
-  display.display();
+  flushFrame(millis());
 }
