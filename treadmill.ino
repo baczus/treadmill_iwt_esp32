@@ -14,6 +14,7 @@ const unsigned long RF_START = 16776974UL;
 const int SIGNALS_PER_KMH       = 10;
 const int START_SPEED_TENTHS    = 10;
 const int INTERVAL_PAIRS        = 5;
+const int MIN_DISPLAY_SPEED_TENTHS = 10;
 
 int walkPhase = 0;
 int intervalPair = 0;
@@ -169,10 +170,11 @@ void loop() {
     tx.send(RF_UP, 24);
   }
   if (evDown == SHORT_PRESS || evDown == REPEAT) {
-    if (speedTenths > 0) speedTenths--;
-    Serial.println("speed down");
+    // Treadmill cannot go below 1.0 km/h: always transmit, but clamp what we show
     tx.setPulseLength(425);
     tx.send(RF_DOWN, 24);
+    if (speedTenths > MIN_DISPLAY_SPEED_TENTHS) speedTenths--;
+    Serial.println("speed down");
   }
 
   if (walkActive) runWalkSequence(now);

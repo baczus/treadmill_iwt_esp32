@@ -33,7 +33,14 @@ void settingsInit() {
   prefs.begin("treadmill", true);
   stepSizeSignals     = prefs.getInt("stepSig", 35);
   baseTenths          = prefs.getInt("baseSpd", 40);
-  stopBeforeStart     = prefs.getInt("stopBef", 1);
+  if (prefs.isKey("stopBef")) {
+    stopBeforeStart = prefs.getInt("stopBef", 1) ? 1 : 0;
+  } else if (prefs.isKey("startM")) {
+    // Migrate from feat/start-modes firmware: only mode 0 sent RF_STOP first
+    stopBeforeStart = (prefs.getInt("startM", 0) == 0) ? 1 : 0;
+  } else {
+    stopBeforeStart = 1;
+  }
   cooldownEnabled     = prefs.getInt("coolEn", 1);
   phaseDurationMinutes = prefs.getInt("phaseMin", 3);
   prefs.end();

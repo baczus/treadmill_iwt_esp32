@@ -72,13 +72,14 @@ static void test_manual_buttons_send_rf() {
   CHECK(count_code(RF_UP) == 1);
   CHECK(getDisplaySpeedTenths() == 1);
 
-  tap(1); // DOWN
-  CHECK(count_code(RF_DOWN) == 1);
-  CHECK(getDisplaySpeedTenths() == 0);
-
-  // DOWN at zero must not underflow
+  // DOWN below the 1.0 km/h floor still transmits but keeps display at 1
+  int downsBefore = count_code(RF_DOWN);
   tap(1);
-  CHECK(getDisplaySpeedTenths() == 0);
+  CHECK(count_code(RF_DOWN) == downsBefore + 1);
+  CHECK(getDisplaySpeedTenths() == 1);
+  tap(1);
+  CHECK(count_code(RF_DOWN) == downsBefore + 2);
+  CHECK(getDisplaySpeedTenths() == 1);
 }
 
 static void test_button_debounce_and_long_press() {
@@ -123,8 +124,8 @@ static void test_hold_repeat() {
     advance_ms(10);
     if (readButtonRepeat(BTN_UP) == REPEAT) ++repeats;
   }
-  // first repeat ~400ms, then every 150ms -> about (5000-400)/150 + 1 = 32
-  CHECK(repeats > 25 && repeats < 40);
+  // first repeat ~400ms, then every 200ms -> about (5000-400)/200 + 1 = 24
+  CHECK(repeats > 18 && repeats < 30);
   set_button(BTN_UP, false);
   advance_ms(40); readButtonRepeat(BTN_UP);
   CHECK(readButtonRepeat(BTN_UP) == NONE);      // no short-press after repeats
