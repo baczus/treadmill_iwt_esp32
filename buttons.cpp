@@ -12,7 +12,9 @@ static bool longFired[3];
 static unsigned long lastRepeat[3];
 
 static const unsigned long REPEAT_DELAY_MS = 400;
-static const unsigned long REPEAT_RATE_MS = 150;
+// Match the 200ms pacing of the automatic ramps — sending faster than this
+// makes the treadmill drop/merge pulses and its speed drifts from the display.
+static const unsigned long REPEAT_RATE_MS = 200;
 
 void initButtons() {
   for (int i = 0; i < 3; i++) {
