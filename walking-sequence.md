@@ -179,11 +179,12 @@ Hold START for 3 s (only when idle, `walkActive == false`) to enter settings.
 The logic runs on a PC without hardware:
 
 ```sh
-test/run.sh    # builds with g++ and runs 28 checks
+test/run.sh    # builds with g++ and runs 34 checks
 ```
 
 - `test/stubs/` — Arduino/RCSwitch/Wire/SSD1306/Preferences stubs, fake clock and buttons,
   RF log recording every transmitted code
 - `test/sketch.cpp` — includes the real `treadmill.ino`, so tests drive the actual `setup()`/`loop()`
 - `test/test_main.cpp` — covers manual taps, debounce/long-press/repeat timing,
-  the full 5-pair walk sequence with exact RF signal counts, stop-mid-walk, and the menu
+  the full 5-pair walk sequence with exact RF signal counts, stop-mid-walk, the menu,
+  and display boot recovery (slow I2C ACK, `begin()` retry, late init via `displayPollInit()`)

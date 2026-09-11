@@ -52,8 +52,9 @@ test/run.sh
 ```
 
 This compiles the actual sketch against lightweight Arduino stubs and runs
-28 checks covering button timing, the full interval sequence (exact RF signal
-counts), stop-mid-walk safety and the settings menu.
+34 checks covering button timing, the full interval sequence (exact RF signal
+counts), stop-mid-walk safety, the settings menu and display boot recovery
+(slow SSD1306 power-up, begin() retry, late init without power cycle).
 
 ## Usage
 

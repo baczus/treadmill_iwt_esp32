@@ -52,20 +52,18 @@ static void ssd1306Recover() {
   displayAvailable = true;
 }
 
-void initDisplay() {
-  Wire.begin(8, 9);
-  Wire.setTimeOut(50);
-  delay(100);
+static unsigned long lastInitAttemptMs = 0;
+static const unsigned long INIT_RETRY_INTERVAL_MS = 2000;
 
+// Single probe + begin attempt. Returns true on success.
+static bool tryDisplayInit() {
   Wire.beginTransmission(OLED_ADDRESS);
   if (Wire.endTransmission() != 0) {
-    Serial.println("OLED not found");
-    return;
+    return false;
   }
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
-    Serial.println("OLED init failed");
-    return;
+    return false;
   }
 
   display.setRotation(2);
@@ -75,6 +73,41 @@ void initDisplay() {
   display.display();
 
   displayAvailable = true;
+  return true;
+}
+
+void initDisplay() {
+  Wire.begin(8, 9);
+  Wire.setTimeOut(50);
+
+  // The SSD1306 powers up slower than the ESP32 boots: a single probe
+  // right after reset often NACKs even though the panel is fine, and the
+  // old code then gave up forever (displayAvailable stayed false, and the
+  // runtime glitch recovery only ran when displayAvailable was true).
+  // Retry a few times so the first boot reliably brings the display up.
+  for (int i = 0; i < 5; i++) {
+    delay(200);
+    if (tryDisplayInit()) {
+      lastInitAttemptMs = millis();
+      return;
+    }
+  }
+  Serial.println("OLED not found");
+  displayAvailable = false;
+  lastInitAttemptMs = millis();
+}
+
+// Non-blocking re-attempt for a display that wasn't ready at boot.
+// Called from the main loop so a slow/power-glitchy panel still comes up
+// a couple of seconds later instead of needing a manual power cycle.
+void displayPollInit(unsigned long now) {
+  if (displayAvailable) return;
+  if (now - lastInitAttemptMs < INIT_RETRY_INTERVAL_MS) return;
+  lastInitAttemptMs = now;
+  if (tryDisplayInit()) {
+    Serial.println("OLED late init ok");
+    lastFrameMs = now - FRAME_INTERVAL_MS;  // draw immediately
+  }
 }
 
 // Flush the framebuffer at most every FRAME_INTERVAL_MS, then verify the
@@ -91,7 +124,10 @@ static void flushFrame(unsigned long now) {
 
 void updateDisplay(const char* status, int speedTenths, int walkPhase, int intervalPair,
                    unsigned long now, unsigned long phaseStart, int phaseSec) {
-  if (!displayAvailable) return;
+  if (!displayAvailable) {
+    displayPollInit(now);
+    if (!displayAvailable) return;
+  }
 
   display.clearDisplay();
 
@@ -149,7 +185,10 @@ void updateDisplay(const char* status, int speedTenths, int walkPhase, int inter
 }
 
 void updateMenuDisplay(bool editMode, int selection, int stepVal, int baseVal, int stopVal, int coolVal, int phaseMin) {
-  if (!displayAvailable) return;
+  if (!displayAvailable) {
+    displayPollInit(millis());
+    if (!displayAvailable) return;
+  }
 
   display.clearDisplay();
 

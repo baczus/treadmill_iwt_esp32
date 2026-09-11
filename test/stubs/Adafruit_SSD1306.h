@@ -5,9 +5,12 @@
 
 struct Adafruit_SSD1306 : Adafruit_GFX {
   Adafruit_SSD1306(int w, int h, TwoWire*, int) : Adafruit_GFX(w, h) {}
-  bool begin(int, int) { return true; }
+  bool begin(int, int);
   void clearDisplay() {}
   void drawRect(int, int, int, int, int) {}
   void fillRect(int, int, int, int, int) {}
   void display() {}
 };
+
+// Fault injection: next N begin() calls fail (panel not ready yet).
+void ssd1306_fail_next(int n);

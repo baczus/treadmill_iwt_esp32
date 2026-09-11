@@ -7,11 +7,15 @@
 extern std::vector<RFEvent> rf_log;
 #include "buttons.h"
 #include "settings.h"
+#include "display.h"
+#include "Wire.h"
+#include "Adafruit_SSD1306.h"
 
 void setup();
 void loop();
 int getDisplaySpeedTenths();
 bool menuIsActive();
+extern bool displayAvailable;
 
 static int failures = 0;
 static int checks = 0;
@@ -200,12 +204,53 @@ static void test_menu_opens_on_start_long_press() {
   CHECK(!menuIsActive());
 }
 
+static void test_display_survives_slow_boot() {
+  reset_fakes();
+  // OLED powers up slower than the ESP32: first 2 probes NACK, then ACK.
+  // Old code gave up after the first NACK -> display stayed dead.
+  wire_fail_next(2);
+  setup();
+  CHECK(displayAvailable);
+  wire_set_down(false);
+}
+
+static void test_display_begin_retry_at_boot() {
+  reset_fakes();
+  // I2C ACKs but the controller isn't ready: first begin() fails.
+  ssd1306_fail_next(1);
+  setup();
+  CHECK(displayAvailable);
+}
+
+static void test_display_late_init_after_boot_failure() {
+  reset_fakes();
+  // Panel completely absent at boot: all 5 boot retries fail.
+  wire_set_down(true);
+  setup();
+  CHECK(!displayAvailable);
+
+  // Panel appears later (power glitch cleared). Polling is throttled to
+  // 2 s so it must not recover immediately, but must recover after that.
+  wire_set_down(false);
+  unsigned long t0 = millis();
+  updateDisplay("Ready", 0, 0, 0, t0 + 100, t0, 0);
+  CHECK(!displayAvailable);
+
+  advance_ms(2100);
+  unsigned long t1 = millis();
+  updateDisplay("Ready", 0, 0, 0, t1, t1, 0);
+  CHECK(displayAvailable);
+}
+
 int main() {
   // Menu test must run while idle; later tests leave walks running/stopped.
   test_menu_opens_on_start_long_press();
   test_manual_buttons_send_rf();
   test_button_debounce_and_long_press();
   test_hold_repeat();
+  test_display_survives_slow_boot();
+  test_display_begin_retry_at_boot();
+  test_display_late_init_after_boot_failure();
   test_full_walk_sequence();
   test_stop_mid_walk_sends_stop_and_resets();
 

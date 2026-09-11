@@ -1,5 +1,7 @@
 #include "Arduino.h"
 #include "RCSwitch.h"
+#include "Wire.h"
+#include "Adafruit_SSD1306.h"
 #include <vector>
 
 SerialStub Serial;
@@ -24,4 +26,6 @@ void reset_fakes() {
   fake_ms = 0;
   for (auto& p : pin_state) p = HIGH;
   rf_log.clear();
+  wire_set_down(false);
+  ssd1306_fail_next(0);
 }
